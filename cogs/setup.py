@@ -109,6 +109,10 @@ class SetupCommands(commands.Cog):
         guild_b = self.bot.get_guild(config.SERVER_B_ID)
         guild_c = self.bot.get_guild(config.SERVER_C_ID)
         checks: list[tuple[str, bool, str]] = []
+        checks.append(("Members intent enabled in code", self.bot.intents.members,
+                       "Also enable Server Members Intent in the Developer Portal."))
+        checks.append(("Message Content intent enabled in code", self.bot.intents.message_content,
+                       "Also enable Message Content Intent in the Developer Portal for cached delete content."))
 
         checks.append(("Server A connected", guild_a is not None,
                        "Hub server is reachable." if guild_a else "Bot is not in Server A."))
