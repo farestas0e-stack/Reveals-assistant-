@@ -35,7 +35,7 @@ class SetupCommands(commands.Cog):
                 "• /setlink — save your checkout or renewal URL\n"
                 "• /setmembershipexpiry — record a member expiry\n"
                 "• /recordrenewal — record renewal when the role stays assigned\\n"
-                "• /setmoderationchannel — choose the Server C log channel"
+                "• /setmoderationchannel — choose the Server C log channel\n                "• /setinvitechannel — choose the Server B invite channel"
             ),
             inline=False,
         )
@@ -100,6 +100,30 @@ class SetupCommands(commands.Cog):
         lines = [f"**{name}:** {'Configured' if value else 'Not configured'}"
                  for name, value in values.items()]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @app_commands.command(name="setinvitechannel", description="Choose the Server B channel used to create member invitations.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def setinvitechannel(
+        self, interaction: discord.Interaction, channel: discord.TextChannel
+    ) -> None:
+        if interaction.guild is None or interaction.guild.id != config.SERVER_B_ID:
+            await interaction.response.send_message(
+                "Run this command in Server B and select a channel where the bot can create invites.",
+                ephemeral=True,
+            )
+            return
+        permissions = channel.permissions_for(interaction.guild.me)
+        if not permissions.view_channel or not permissions.create_instant_invite:
+            await interaction.response.send_message(
+                "I need View Channel and Create Invite permissions in that channel.",
+                ephemeral=True,
+            )
+            return
+        await self.bot.database.set_setting("server_b_invite_channel_id", str(channel.id))
+        await interaction.response.send_message(
+            f"New member invitations will be created in {channel.mention}.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="setmoderationchannel", description="Choose the moderation log channel in Server C.")
     @app_commands.checks.has_permissions(administrator=True)
