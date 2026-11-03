@@ -52,6 +52,9 @@ class SetupCommands(commands.Cog):
         if interaction.guild is None or interaction.guild.id != config.SERVER_A_ID:
             await interaction.response.send_message("Run this command in Server A.", ephemeral=True)
             return
+        if role.is_default():
+            await interaction.response.send_message("Choose a staff role other than @everyone.", ephemeral=True)
+            return
         await self.bot.database.set_setting("staff_role_id", str(role.id))
         await interaction.response.send_message(
             f"Private tickets will be visible to {role.mention}, the ticket creator and the bot.",
