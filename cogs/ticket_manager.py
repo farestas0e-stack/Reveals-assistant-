@@ -284,6 +284,18 @@ class TicketManager(commands.Cog):
                     "You are already in Server B, but I could not grant the configured access role. "
                     "Staff will help you shortly.",
                 )
+            guild_a = self.bot.get_guild(config.SERVER_A_ID)
+            if guild_a:
+                tickets = await self.bot.database.get_open_tickets_for_user(guild_a.id, member.id)
+                for ticket in tickets:
+                    if ticket["ticket_type"] in {"purchase", "invitation", "renewal"}:
+                        ticket_channel = guild_a.get_channel(ticket["channel_id"])
+                        await self.bot.database.close_ticket(ticket["channel_id"])
+                        if ticket_channel:
+                            try:
+                                await ticket_channel.delete(reason="Member already has verified Server B access")
+                            except discord.HTTPException:
+                                log.exception("Could not delete completed onboarding ticket %s", ticket_channel.id)
             log.info("Member %s is already in Server B; no invite is needed.", member.id)
             return True
 
