@@ -65,6 +65,29 @@ class TicketManager(commands.Cog):
         role_id = await self._setting_int("staff_role_id", config.MODERATOR_ROLE_ID)
         return guild.get_role(role_id) if role_id else None
 
+    async def _assign_server_b_access_role(self, member: discord.Member) -> None:
+        role_value = await self.bot.database.get_setting("server_b_access_role_id")
+        if not role_value:
+            return
+        try:
+            role_id = int(role_value)
+        except ValueError:
+            log.error("Configured Server B access role ID is invalid.")
+            return
+        role = member.guild.get_role(role_id)
+        bot_member = member.guild.me
+        if role is None or bot_member is None:
+            log.error("Configured Server B access role or bot member is unavailable.")
+            return
+        if not bot_member.guild_permissions.manage_roles or role >= bot_member.top_role:
+            log.error("Bot cannot assign Server B access role %s; check Manage Roles and role hierarchy.", role_id)
+            return
+        if role not in member.roles:
+            try:
+                await member.add_roles(role, reason="Verified Mentorship membership in Server A")
+            except (discord.Forbidden, discord.HTTPException):
+                log.exception("Could not assign Server B access role to %s", member.id)
+
     async def create_private_ticket(
         self, guild: discord.Guild, user: discord.Member, ticket_type: str,
         *, opening_message: str | None = None,
@@ -253,6 +276,7 @@ class TicketManager(commands.Cog):
                     member, "I could not verify your private community membership. Staff will help you."
                 )
         if member_b is not None:
+            await self._assign_server_b_access_role(member_b)
             log.info("Member %s is already in Server B; no invite is needed.", member.id)
             return True
 
@@ -330,6 +354,7 @@ class TicketManager(commands.Cog):
             except (discord.Forbidden, discord.HTTPException):
                 log.exception("Could not remove ineligible joiner %s from Server B", member.id)
             return
+        await self._assign_server_b_access_role(member)
         tickets = await self.bot.database.get_open_tickets_for_user(guild_a.id, member.id)
         for ticket in tickets:
             if ticket["ticket_type"] in {"purchase", "invitation", "renewal"}:
