@@ -264,7 +264,7 @@ class TicketManager(commands.Cog):
                 )
                 log.info("Created invitation ticket %s for %s", ticket.id, member.id)
                 return True
-            except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+            except (discord.Forbidden, discord.HTTPException, discord.NotFound, RuntimeError):
                 log.exception("Could not create invitation fallback ticket")
                 return False
 
