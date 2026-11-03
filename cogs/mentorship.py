@@ -66,7 +66,13 @@ class Mentorship(commands.Cog):
                     log.exception("Could not issue invite or renewal ticket for %s", after.id)
         else:
             if community:
-                member_b = community.get_member(after.id)
+                try:
+                    member_b = community.get_member(after.id) or await community.fetch_member(after.id)
+                except discord.NotFound:
+                    member_b = None
+                except discord.HTTPException:
+                    log.exception("Could not look up %s in Server B.", after.id)
+                    member_b = None
                 if member_b:
                     try:
                         await member_b.kick(reason="Mentorship role removed in Server A")
@@ -83,7 +89,15 @@ class Mentorship(commands.Cog):
             community = self.bot.get_guild(cfg["server_b_id"])
             role = source.get_role(cfg["mentorship_role_id"])
             for user_id in await database.expired_subscriptions(source.id):
-                member_b = community.get_member(user_id) if community else None
+                member_b = None
+                if community:
+                    try:
+                        member_b = community.get_member(user_id) or await community.fetch_member(user_id)
+                    except discord.NotFound:
+                        member_b = None
+                    except discord.HTTPException:
+                        log.exception("Could not look up expired member %s in Server B; retrying next cycle.", user_id)
+                        continue
                 if member_b:
                     try:
                         await member_b.kick(reason="Mentorship subscription expired")
