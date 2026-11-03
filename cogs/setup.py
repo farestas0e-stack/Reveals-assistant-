@@ -136,7 +136,8 @@ class SetupCommands(commands.Cog):
             ):
                 notify_channel = guild_a.get_channel(channel_id)
                 can_send = isinstance(notify_channel, discord.TextChannel) and (
-                    notify_channel.permissions_for(guild_a.me).send_messages
+                    notify_channel.permissions_for(guild_a.me).view_channel
+                    and notify_channel.permissions_for(guild_a.me).send_messages
                     and notify_channel.permissions_for(guild_a.me).embed_links
                 )
                 checks.append((label, can_send,
@@ -169,7 +170,8 @@ class SetupCommands(commands.Cog):
             log_id = await self.bot.database.get_setting("moderation_log_channel_id")
             log_channel = guild_c.get_channel(int(log_id)) if log_id and log_id.isdigit() else None
             can_log = isinstance(log_channel, discord.TextChannel) and (
-                log_channel.permissions_for(guild_c.me).send_messages
+                log_channel.permissions_for(guild_c.me).view_channel
+                and log_channel.permissions_for(guild_c.me).send_messages
                 and log_channel.permissions_for(guild_c.me).embed_links
             )
             checks.append(("Server C moderation channel", can_log,
