@@ -161,8 +161,8 @@ class TicketManager(commands.Cog):
                     "I've sent your payment link by DM.", ephemeral=True
                 )
                 return
-            except discord.Forbidden:
-                # A private ticket is the fallback when the member has DMs disabled.
+            except discord.HTTPException:
+                # A private ticket is the fallback when the member cannot receive DMs.
                 pass
 
         try:
@@ -384,6 +384,9 @@ class TicketManager(commands.Cog):
         self, interaction: discord.Interaction, title: str | None = None,
         description: str | None = None, color: str | None = None
     ) -> None:
+        if not self._in_server_a(interaction):
+            await interaction.response.send_message("Use this command in Server A.", ephemeral=True)
+            return
         channel_id = await self.bot.database.get_setting("panel_channel_id")
         message_id = await self.bot.database.get_setting("panel_message_id")
         if not channel_id or not message_id:
