@@ -179,7 +179,7 @@ class MembershipManager(commands.Cog):
                                 await ticket_cog.create_private_ticket(
                                     guild_a, member_a, "renewal", opening_message=opening
                                 )
-                            except (discord.Forbidden, discord.HTTPException):
+                            except (discord.Forbidden, discord.HTTPException, RuntimeError):
                                 log.exception("Renewal ticket creation failed for %s", user_id)
         except Exception:
             log.exception("Membership expiry cycle failed")
