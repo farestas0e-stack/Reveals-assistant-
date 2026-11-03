@@ -263,7 +263,7 @@ class TicketManager(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
-        if member.guild.id != config.SERVER_B_ID:
+        if member.guild.id != config.SERVER_B_ID or member.bot:
             return
         guild_a = self.bot.get_guild(config.SERVER_A_ID)
         if guild_a is None:
