@@ -97,6 +97,15 @@ class Mentorship(commands.Cog):
                 except discord.HTTPException:
                     log.exception("Could not send role-revoked alert.")
             await database.deactivate_subscription(after.id, after.guild.id)
+            # Notify the member immediately when the configured role is removed.
+            try:
+                await after.send(f"Your mentorship access was removed. You can renew your membership here: {cfg['renewal_url']}")
+            except discord.HTTPException:
+                try:
+                    from .ticketing import create_private_ticket
+                    await create_private_ticket(after.guild, after, cfg, "renewal")
+                except (discord.HTTPException, discord.Forbidden, RuntimeError):
+                    log.exception("Could not deliver renewal instructions to %s.", after.id)
 
     @tasks.loop(minutes=5)
     async def expiry_check(self):
@@ -127,22 +136,26 @@ class Mentorship(commands.Cog):
                         continue
 
                 member_a = source.get_member(user_id)
+                role_removed = False
                 if member_a and role and role in member_a.roles:
                     try:
                         await member_a.remove_roles(role, reason="Mentorship subscription expired")
+                        role_removed = True
                     except discord.HTTPException:
                         log.exception("Could not remove expired role from %s.", user_id)
 
-                try:
-                    user = await self.bot.fetch_user(user_id)
-                    await user.send(f"Your mentorship subscription expired. Renew here: {cfg['renewal_url']}")
-                except discord.HTTPException:
+                # If the role was already absent, no member-update event fires, so notify here.
+                if not role_removed:
                     try:
-                        from .ticketing import create_private_ticket
                         user = await self.bot.fetch_user(user_id)
-                        await create_private_ticket(source, user, cfg, "renewal")
-                    except (discord.HTTPException, discord.Forbidden, RuntimeError):
-                        log.exception("Could not DM or create renewal ticket for %s.", user_id)
+                        await user.send(f"Your mentorship subscription expired. Renew here: {cfg['renewal_url']}")
+                    except discord.HTTPException:
+                        try:
+                            from .ticketing import create_private_ticket
+                            user = await self.bot.fetch_user(user_id)
+                            await create_private_ticket(source, user, cfg, "renewal")
+                        except (discord.HTTPException, discord.Forbidden, RuntimeError):
+                            log.exception("Could not deliver renewal instructions for %s.", user_id)
                 await database.deactivate_subscription(user_id, source.id)
 
     @expiry_check.before_loop
