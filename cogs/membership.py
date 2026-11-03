@@ -53,7 +53,7 @@ class MembershipManager(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
-        if after.guild.id != config.SERVER_A_ID:
+        if after.guild.id != config.SERVER_A_ID or after.bot:
             return
         had_role = any(role.id == config.MENTORSHIP_ROLE_ID for role in before.roles)
         has_role = any(role.id == config.MENTORSHIP_ROLE_ID for role in after.roles)
