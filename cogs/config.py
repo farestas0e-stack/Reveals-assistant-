@@ -16,6 +16,7 @@ class Config(commands.Cog):
     async def setup(self, interaction: discord.Interaction,
         server_b_id: str, mentorship_role: discord.Role,
         sales_channel: discord.TextChannel, audit_channel: discord.TextChannel,
+        role_assigned_channel: discord.TextChannel, role_revoked_channel: discord.TextChannel,
         ticket_category: discord.CategoryChannel, renewal_category: discord.CategoryChannel,
         renewal_url: str, subscription_days: app_commands.Range[int, 1, 365] = 30,
         server_c_id: str | None = None, log_channel_id: str | None = None):
@@ -29,7 +30,7 @@ class Config(commands.Cog):
         except ValueError:
             return await interaction.response.send_message("Server and channel IDs must be numeric Discord IDs.", ephemeral=True)
         if any(x.guild.id != server_a.id for x in
-               (mentorship_role, sales_channel, audit_channel, ticket_category, renewal_category)):
+               (mentorship_role, sales_channel, audit_channel, role_assigned_channel, role_revoked_channel, ticket_category, renewal_category)):
             return await interaction.response.send_message("All selected roles and channels must belong to Server A.", ephemeral=True)
         server_b = self.bot.get_guild(b_id)
         if server_b is None:
@@ -44,6 +45,8 @@ class Config(commands.Cog):
         await database.set_config(server_a.id, server_a_id=server_a.id,
             server_b_id=b_id, server_c_id=c_id, mentorship_role_id=mentorship_role.id,
             sales_channel_id=sales_channel.id, audit_channel_id=audit_channel.id,
+            role_assigned_channel_id=role_assigned_channel.id,
+            role_revoked_channel_id=role_revoked_channel.id,
             ticket_category_id=ticket_category.id, renewal_category_id=renewal_category.id,
             log_channel_id=log_id, renewal_url=renewal_url,
             subscription_days=subscription_days)
