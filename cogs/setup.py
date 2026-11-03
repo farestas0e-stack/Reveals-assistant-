@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import discord
+import config
 from discord import app_commands
 from discord.ext import commands
 
@@ -17,6 +18,7 @@ class SetupCommands(commands.Cog):
         staff = await self.bot.database.get_setting("staff_role_id")
         checkout = await self.bot.database.get_setting("superprofile_checkout_url")
         renewal = await self.bot.database.get_setting("superprofile_renewal_url")
+        moderation = await self.bot.database.get_setting("moderation_log_channel_id")
         embed = discord.Embed(
             title="Mentorship Bot Setup",
             description="Use the admin commands below to finish configuring the bot.",
@@ -25,6 +27,7 @@ class SetupCommands(commands.Cog):
         embed.add_field(name="Staff role", value="Configured" if staff else "Not configured", inline=True)
         embed.add_field(name="Checkout link", value="Configured" if checkout else "Not configured", inline=True)
         embed.add_field(name="Renewal link", value="Configured" if renewal else "Not configured", inline=True)
+        embed.add_field(name="Moderation log channel", value="Configured" if moderation else "Not configured", inline=True)
         embed.add_field(
             name="Commands",
             value=(
@@ -68,6 +71,20 @@ class SetupCommands(commands.Cog):
     async def setrenewallink(self, interaction: discord.Interaction, url: str) -> None:
         await self._save_url(interaction, "superprofile_renewal_url", "Renewal", url)
 
+    @app_commands.command(name="setlink", description="Set the checkout or renewal payment URL.")
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.choices(link_type=[
+        app_commands.Choice(name="Purchase / checkout", value="checkout"),
+        app_commands.Choice(name="Renewal", value="renewal"),
+    ])
+    async def setlink(
+        self, interaction: discord.Interaction,
+        link_type: app_commands.Choice[str], url: str
+    ) -> None:
+        key = "superprofile_checkout_url" if link_type.value == "checkout" else "superprofile_renewal_url"
+        label = "Checkout" if link_type.value == "checkout" else "Renewal"
+        await self._save_url(interaction, key, label, url)
+
     @app_commands.command(name="setupstatus", description="Show whether the required settings are configured.")
     @app_commands.checks.has_permissions(administrator=True)
     async def setupstatus(self, interaction: discord.Interaction) -> None:
@@ -75,6 +92,7 @@ class SetupCommands(commands.Cog):
             "Staff role": await self.bot.database.get_setting("staff_role_id"),
             "Superprofile checkout": await self.bot.database.get_setting("superprofile_checkout_url"),
             "Superprofile renewal": await self.bot.database.get_setting("superprofile_renewal_url"),
+            "Server C moderation channel": await self.bot.database.get_setting("moderation_log_channel_id"),
         }
         lines = [f"**{name}:** {'Configured' if value else 'Not configured'}"
                  for name, value in values.items()]
@@ -85,7 +103,7 @@ class SetupCommands(commands.Cog):
     async def setmoderationchannel(
         self, interaction: discord.Interaction, channel: discord.TextChannel
     ) -> None:
-        if interaction.guild is None or interaction.guild.id != 1566866397538025552:
+        if interaction.guild is None or interaction.guild.id != config.SERVER_C_ID:
             await interaction.response.send_message(
                 "Run this command in Server C, then select its moderation log channel.",
                 ephemeral=True,
