@@ -292,7 +292,7 @@ class TicketManager(commands.Cog):
             return
         tickets = await self.bot.database.get_open_tickets_for_user(guild_a.id, member.id)
         for ticket in tickets:
-            if ticket["ticket_type"] in {"invitation", "renewal"}:
+            if ticket["ticket_type"] in {"purchase", "invitation", "renewal"}:
                 channel = guild_a.get_channel(ticket["channel_id"])
                 await self.bot.database.close_ticket(ticket["channel_id"])
                 if channel:
