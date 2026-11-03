@@ -19,6 +19,11 @@ class AdminTools(commands.Cog):
         if interaction.guild is None or interaction.guild.id != config.SERVER_A_ID:
             await interaction.response.send_message("Use this command in Server A.", ephemeral=True)
             return
+        if not message.strip() or len(message) > 2000:
+            await interaction.response.send_message(
+                "The broadcast must contain 1–2000 characters.", ephemeral=True
+            )
+            return
         await interaction.response.defer(ephemeral=True, thinking=True)
         sent = failed = skipped = 0
         for channel in category.text_channels:
