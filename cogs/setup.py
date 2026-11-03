@@ -32,9 +32,9 @@ class SetupCommands(commands.Cog):
             name="Commands",
             value=(
                 "• /setstaffrole — choose the staff role\n"
-                "• /setcheckoutlink — save your Superprofile purchase URL\n"
-                "• /setrenewallink — save your Superprofile renewal URL\n"
-                "• /setupstatus — review saved settings\\n"
+                "• /setlink — save your checkout or renewal URL\n"
+                "• /setmembershipexpiry — record a member expiry\n"
+                "• /recordrenewal — record renewal when the role stays assigned\\n"
                 "• /setmoderationchannel — choose the Server C log channel"
             ),
             inline=False,
@@ -45,6 +45,9 @@ class SetupCommands(commands.Cog):
     @app_commands.command(name="setstaffrole", description="Set the role allowed to view private tickets.")
     @app_commands.checks.has_permissions(administrator=True)
     async def setstaffrole(self, interaction: discord.Interaction, role: discord.Role) -> None:
+        if interaction.guild is None or interaction.guild.id != config.SERVER_A_ID:
+            await interaction.response.send_message("Run this command in Server A.", ephemeral=True)
+            return
         await self.bot.database.set_setting("staff_role_id", str(role.id))
         await interaction.response.send_message(
             f"Private tickets will be visible to {role.mention}, the ticket creator and the bot.",
