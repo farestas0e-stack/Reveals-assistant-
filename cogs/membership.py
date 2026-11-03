@@ -148,6 +148,11 @@ class MembershipManager(commands.Cog):
                         log.exception("Could not kick expired member %s", user_id)
 
                 await self.bot.database.set_subscription_active(guild_a.id, user_id, False)
+                await self.bot.database.add_audit_event(
+                    guild_a.id, "membership_expired_access_removed",
+                    target_id=user_id,
+                    details={"server_b_kicked": bool(member_b), "reason": "expiry passed and Mentorship role absent"},
+                )
                 renewal_url = await self.bot.database.get_setting("superprofile_renewal_url")
                 delivered = False
                 recipient = member_a
