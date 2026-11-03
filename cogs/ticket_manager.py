@@ -216,13 +216,21 @@ class TicketManager(commands.Cog):
                 "This invitation can be used once and does not expire by time."
             )
             return True
-        except discord.Forbidden:
+        except discord.HTTPException:
             guild_a = self.bot.get_guild(config.SERVER_A_ID)
             if guild_a is None:
                 return False
             existing = await self.bot.database.get_open_tickets_for_user(guild_a.id, member.id)
-            if any(t["ticket_type"] == "invitation" for t in existing):
-                return False
+            existing_invite = next((t for t in existing if t["ticket_type"] == "invitation"), None)
+            if existing_invite:
+                existing_channel = guild_a.get_channel(existing_invite["channel_id"])
+                if existing_channel:
+                    try:
+                        await existing_channel.send(f"Your refreshed Server B invitation is: {invite.url}")
+                        return True
+                    except discord.HTTPException:
+                        log.exception("Could not refresh invitation ticket %s", existing_channel.id)
+                        return False
             try:
                 ticket = await self.create_private_ticket(
                     guild_a, guild_a.get_member(member.id) or await guild_a.fetch_member(member.id),
