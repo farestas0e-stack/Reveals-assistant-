@@ -86,8 +86,8 @@ class MembershipManager(commands.Cog):
             title, status, color = "Mentorship role assigned / renewed", "Inactive → Active", discord.Color.green()
             event_type = "mentorship_role_added"
         else:
-            await self.bot.database.set_subscription_active(after.guild.id, after.id, False)
-            title, status, color = "Mentorship role removed", "Active → Inactive", discord.Color.red()
+            # Keep expiry records scheduled; the expiry worker re-checks the source role at expiry.
+            title, status, color = "Mentorship role removed", "Role absent; expiry check remains scheduled", discord.Color.red()
             event_type = "mentorship_role_removed"
 
         embed = discord.Embed(title=title, color=color, timestamp=now)
