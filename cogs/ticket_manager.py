@@ -347,6 +347,9 @@ class TicketManager(commands.Cog):
         if interaction.guild is None or interaction.guild.id != config.SERVER_A_ID:
             await interaction.response.send_message("Use this command in Server A.", ephemeral=True)
             return
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.response.send_message("Run this command in a normal text channel.", ephemeral=True)
+            return
         saved_channel = await self.bot.database.get_setting("panel_channel_id")
         saved_message = await self.bot.database.get_setting("panel_message_id")
         if saved_channel and saved_message:
