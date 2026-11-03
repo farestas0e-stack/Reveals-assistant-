@@ -193,11 +193,22 @@ class TicketManager(commands.Cog):
             log.info("Member %s is already in Server B; no invite is needed.", member.id)
             return True
         target_channel = None
-        for channel in guild_b.text_channels:
-            perms = channel.permissions_for(guild_b.me)
-            if perms.create_instant_invite and perms.view_channel:
-                target_channel = channel
-                break
+        configured_channel = await self.bot.database.get_setting("server_b_invite_channel_id")
+        if configured_channel:
+            try:
+                selected = guild_b.get_channel(int(configured_channel))
+            except ValueError:
+                selected = None
+            if isinstance(selected, discord.TextChannel):
+                selected_perms = selected.permissions_for(guild_b.me)
+                if selected_perms.create_instant_invite and selected_perms.view_channel:
+                    target_channel = selected
+        if target_channel is None:
+            for channel in guild_b.text_channels:
+                perms = channel.permissions_for(guild_b.me)
+                if perms.create_instant_invite and perms.view_channel:
+                    target_channel = channel
+                    break
         if target_channel is None:
             log.error("No Server B channel permits invite creation.")
             return False
