@@ -43,6 +43,40 @@ class BotDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(expired), 1)
         self.assertEqual(expired[0]["user_id"], 300)
 
+    async def test_upgrade_from_previous_ticket_schema(self) -> None:
+        old_dir = tempfile.TemporaryDirectory()
+        old_path = Path(old_dir.name) / "old.sqlite3"
+        import aiosqlite
+        connection = await aiosqlite.connect(old_path)
+        await connection.execute("""
+            CREATE TABLE tickets (
+                ticket_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL,
+                ticket_type TEXT NOT NULL
+                    CHECK (ticket_type IN ('support', 'purchase', 'renewal')),
+                status TEXT NOT NULL DEFAULT 'open'
+                    CHECK (status IN ('open', 'closed')),
+                created_at TEXT NOT NULL,
+                closed_at TEXT
+            )
+        """)
+        await connection.execute(
+            "CREATE INDEX idx_tickets_user_status ON tickets(user_id, status)"
+        )
+        await connection.commit()
+        await connection.close()
+
+        upgraded = BotDatabase(str(old_path))
+        await upgraded.initialize()
+        try:
+            ticket_id = await upgraded.create_ticket(100, 201, 301, "invitation")
+            self.assertGreater(ticket_id, 0)
+        finally:
+            await upgraded.close()
+            old_dir.cleanup()
+
     async def test_ticket_type_validation(self) -> None:
         with self.assertRaises(ValueError):
             await self.database.create_ticket(100, 201, 300, "unknown")
