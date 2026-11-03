@@ -379,6 +379,47 @@ class TicketManager(commands.Cog):
                     except discord.HTTPException:
                         log.exception("Could not delete completed onboarding ticket %s", channel.id)
 
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
+        if after.guild.id != config.SERVER_B_ID or after.bot:
+            return
+        role_value = await self.bot.database.get_setting("server_b_access_role_id")
+        if not role_value:
+            return
+        try:
+            access_role_id = int(role_value)
+        except ValueError:
+            return
+        had_access = any(role.id == access_role_id for role in before.roles)
+        has_access = any(role.id == access_role_id for role in after.roles)
+        if had_access or not has_access:
+            return
+
+        guild_a = self.bot.get_guild(config.SERVER_A_ID)
+        if guild_a is None:
+            return
+        member_a = guild_a.get_member(after.id)
+        if member_a is None:
+            try:
+                member_a = await guild_a.fetch_member(after.id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                member_a = None
+        if not member_a or not any(
+            role.id == config.MENTORSHIP_ROLE_ID for role in member_a.roles
+        ):
+            return
+
+        tickets = await self.bot.database.get_open_tickets_for_user(guild_a.id, after.id)
+        for ticket in tickets:
+            if ticket["ticket_type"] in {"purchase", "invitation", "renewal"}:
+                channel = guild_a.get_channel(ticket["channel_id"])
+                await self.bot.database.close_ticket(ticket["channel_id"])
+                if channel:
+                    try:
+                        await channel.delete(reason="Eligible member access role granted in Server B")
+                    except discord.HTTPException:
+                        log.exception("Could not delete completed onboarding ticket %s", channel.id)
+
     @app_commands.command(name="createpanel", description="Create the persistent support and purchase panel.")
     @app_commands.checks.has_permissions(administrator=True)
     async def createpanel(self, interaction: discord.Interaction) -> None:
