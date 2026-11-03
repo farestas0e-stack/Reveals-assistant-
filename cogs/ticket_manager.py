@@ -302,6 +302,54 @@ class TicketManager(commands.Cog):
         await message.edit(embed=embed, view=self.panel_view)
         await interaction.response.send_message("Panel updated.", ephemeral=True)
 
+    async def _edit_saved_embed(self, interaction: discord.Interaction, *, title: str | None = None,
+                                description: str | None = None, color: str | None = None) -> None:
+        channel_id = await self.bot.database.get_setting("panel_channel_id")
+        message_id = await self.bot.database.get_setting("panel_message_id")
+        if not channel_id or not message_id:
+            await interaction.response.send_message("Create a panel first with /createpanel.", ephemeral=True)
+            return
+        channel = self.bot.get_channel(int(channel_id))
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message("The saved panel channel is unavailable.", ephemeral=True)
+            return
+        try:
+            message = await channel.fetch_message(int(message_id))
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            await interaction.response.send_message("I couldn't find the saved panel message.", ephemeral=True)
+            return
+        embed = message.embeds[0].copy() if message.embeds else discord.Embed()
+        if title is not None:
+            embed.title = title[:256]
+        if description is not None:
+            embed.description = description[:4000]
+        if color is not None:
+            try:
+                cleaned = color.strip().removeprefix("#")
+                if len(cleaned) != 6:
+                    raise ValueError
+                embed.color = discord.Color(int(cleaned, 16))
+            except ValueError:
+                await interaction.response.send_message("Color must be a hex value such as #5865F2.", ephemeral=True)
+                return
+        await message.edit(embed=embed, view=self.panel_view)
+        await interaction.response.send_message("Panel updated.", ephemeral=True)
+
+    @app_commands.command(name="settitle", description="Change the saved panel title.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def settitle(self, interaction: discord.Interaction, title: str) -> None:
+        await self._edit_saved_embed(interaction, title=title)
+
+    @app_commands.command(name="setdescription", description="Change the saved panel description.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def setdescription(self, interaction: discord.Interaction, description: str) -> None:
+        await self._edit_saved_embed(interaction, description=description)
+
+    @app_commands.command(name="setcolor", description="Change the saved panel embed color.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def setcolor(self, interaction: discord.Interaction, hex_color: str) -> None:
+        await self._edit_saved_embed(interaction, color=hex_color)
+
     @app_commands.command(name="setbutton", description="Change a ticket panel button label.")
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.choices(button=[
