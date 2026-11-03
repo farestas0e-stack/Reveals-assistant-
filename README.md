@@ -44,6 +44,15 @@ The bot must be invited to all three servers.
 
 The SQLite database is created automatically at `data/bot.sqlite3`. Keep this folder on persistent storage when hosting the bot.
 
+## Create and invite the Discord bot
+
+1. Open the Discord Developer Portal: https://discord.com/developers/applications
+2. Create an application, open its **Bot** page and add a bot user.
+3. Copy the bot token and store it privately as the `DISCORD_BOT_TOKEN` environment variable. Never paste it into GitHub.
+4. In **OAuth2 → URL Generator**, select the `bot` and `applications.commands` scopes.
+5. Select the permissions listed below and use the generated invite URL to add the bot to Server A, Server B and Server C.
+6. If the token is ever exposed, reset it immediately in the Developer Portal and update the environment variable wherever the bot is hosted.
+
 ## Discord Developer Portal
 
 In the bot application's **Bot** settings, enable:
