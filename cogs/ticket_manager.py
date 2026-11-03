@@ -96,7 +96,14 @@ class TicketManager(commands.Cog):
         )
         category = next((c for c in categories if len(c.channels) < 49), None)
         if category is None:
-            name = "Tickets" if not categories else f"Tickets - Part {len(categories) + 1}"
+            if not categories:
+                name = "Tickets"
+            else:
+                part_numbers = [
+                    int(item.name.rsplit(" ", 1)[-1])
+                    for item in categories if item.name != "Tickets"
+                ]
+                name = f"Tickets - Part {max(part_numbers, default=1) + 1}"
             category = await guild.create_category(
                 name, overwrites={guild.default_role: discord.PermissionOverwrite(view_channel=False)},
                 reason="Automatic ticket category management"
