@@ -102,7 +102,7 @@ Example expiry value: `2027-12-31T23:59:00+00:00`.
 
 ### Verify setup
 
-Run `/setup` and `/setupstatus`.
+Run `/setup`, `/setupstatus` and `/healthcheck`.
 
 ## Membership workflow
 
@@ -132,7 +132,7 @@ Run `/setup` and `/setupstatus`.
 
 - `/broadcast category:<category> message:<message>` — send to text channels in a category where the bot can view and send.
 - `/setstaffrole`, `/setlink`, `/setinvitechannel`, `/setmoderationchannel`
-- `/setmembershipexpiry`, `/recordrenewal`, `/syncmember`
+- `/setmembershipexpiry`, `/recordrenewal`, `/syncmember`, `/healthcheck`
 
 ## Important operational notes
 
