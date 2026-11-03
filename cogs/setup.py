@@ -223,6 +223,13 @@ class SetupCommands(commands.Cog):
                 ephemeral=True,
             )
             return
+        permissions = channel.permissions_for(interaction.guild.me)
+        if not permissions.view_channel or not permissions.send_messages or not permissions.embed_links:
+            await interaction.response.send_message(
+                "I need View Channel, Send Messages and Embed Links in that log channel.",
+                ephemeral=True,
+            )
+            return
         await self.bot.database.set_setting("moderation_log_channel_id", str(channel.id))
         await interaction.response.send_message(
             f"Moderation events will be forwarded to {channel.mention}.",
