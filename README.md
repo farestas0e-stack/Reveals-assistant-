@@ -69,6 +69,7 @@ Do not grant Administrator unless you deliberately prefer that. Grant the follow
 - View Channels
 - Create Instant Invite
 - Kick Members
+- Manage Roles (to assign the configured private-community access role)
 
 ### Server C
 - View Channel
