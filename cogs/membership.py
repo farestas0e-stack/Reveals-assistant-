@@ -292,6 +292,27 @@ class MembershipManager(commands.Cog):
             interaction.guild.id, member.id, started_at=utcnow(),
             expires_at=expiry, source="admin_recorded_renewal", active=True,
         )
+        renewal_embed = discord.Embed(
+            title="Mentorship membership renewed",
+            color=discord.Color.green(),
+            timestamp=discord.utils.utcnow(),
+        )
+        renewal_embed.add_field(
+            name="Member", value=f"{member.mention} ({member.id})", inline=False
+        )
+        renewal_embed.add_field(
+            name="New expiry", value=f"<t:{int(expiry.timestamp())}:F>", inline=True
+        )
+        renewal_embed.add_field(
+            name="Recorded by", value=f"{interaction.user} ({interaction.user.id})", inline=True
+        )
+        await self._notify(config.SALES_CHANNEL_ID, renewal_embed)
+        await self._notify(config.ROLE_ASSIGNED_CHANNEL_ID, renewal_embed)
+        await self.bot.database.add_audit_event(
+            interaction.guild.id, "membership_renewal_recorded",
+            actor_id=interaction.user.id, target_id=member.id,
+            details={"expires_at": expiry.isoformat(), "source": "admin_recorded_renewal"},
+        )
         tickets = await self.bot.database.get_open_tickets_for_user(interaction.guild.id, member.id)
         for ticket in tickets:
             if ticket["ticket_type"] == "renewal":
