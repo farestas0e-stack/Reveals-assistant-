@@ -126,6 +126,18 @@ class SetupCommands(commands.Cog):
                            "Run /setstaffrole in Server A." if staff_role is None else staff_role.name))
             checks.append(("Mentorship role exists", guild_a.get_role(config.MENTORSHIP_ROLE_ID) is not None,
                            "The configured Mentorship role must exist in Server A."))
+            for label, channel_id in (
+                ("Sales notification channel", config.SALES_CHANNEL_ID),
+                ("Role assigned notification channel", config.ROLE_ASSIGNED_CHANNEL_ID),
+                ("Role removed notification channel", config.ROLE_REMOVED_CHANNEL_ID),
+            ):
+                notify_channel = guild_a.get_channel(channel_id)
+                can_send = isinstance(notify_channel, discord.TextChannel) and (
+                    notify_channel.permissions_for(guild_a.me).send_messages
+                    and notify_channel.permissions_for(guild_a.me).embed_links
+                )
+                checks.append((label, can_send,
+                               notify_channel.mention if can_send else "Check channel ID and Send Messages / Embed Links permissions."))
         if guild_b and guild_b.me:
             perms_b = guild_b.me.guild_permissions
             checks.append(("Server B Kick Members", perms_b.kick_members,
