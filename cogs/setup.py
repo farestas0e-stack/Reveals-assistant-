@@ -33,12 +33,12 @@ class SetupCommands(commands.Cog):
         embed.add_field(
             name="Commands",
             value=(
-                "• /setstaffrole — choose the staff role\\n"
-                "• /setlink — save your checkout or renewal URL\\n"
-                "• /setmembershipexpiry — record a member expiry\\n"
-                "• /syncmember — re-check role and resend invite\\n"
-                "• /recordrenewal — record renewal when the role stays assigned\\n"
-                "• /setmoderationchannel — choose the Server C log channel\\n"
+                "• /setstaffrole — choose the staff role\n"
+                "• /setlink — save your checkout or renewal URL\n"
+                "• /setmembershipexpiry — record a member expiry\n"
+                "• /syncmember — re-check role and resend invite\n"
+                "• /recordrenewal — record renewal when the role stays assigned\n"
+                "• /setmoderationchannel — choose the Server C log channel\n"
                 "• /setinvitechannel — choose the Server B invite channel"
             ),
             inline=False,
