@@ -31,7 +31,7 @@ class SetupCommands(commands.Cog):
         embed.add_field(name="Renewal link", value="Configured" if renewal else "Not configured", inline=True)
         embed.add_field(name="Moderation log channel", value="Configured" if moderation else "Not configured", inline=True)
         embed.add_field(name="Server B invite channel", value="Configured" if invite_channel else "Auto-detect", inline=True)
-        embed.add_field(name="Server B access role", value="Configured" if access_role else "Not configured", inline=True)
+        embed.add_field(name="Server B access role", value="Configured" if access_role else "Optional — not set", inline=True)
         embed.add_field(
             name="Commands",
             value=(
@@ -198,7 +198,7 @@ class SetupCommands(commands.Cog):
             "Superprofile renewal": await self.bot.database.get_setting("superprofile_renewal_url"),
             "Server C moderation channel": await self.bot.database.get_setting("moderation_log_channel_id"),
             "Server B invite channel": await self.bot.database.get_setting("server_b_invite_channel_id"),
-            "Server B access role": await self.bot.database.get_setting("server_b_access_role_id"),
+            "Server B access role": (await self.bot.database.get_setting("server_b_access_role_id")) or "optional",
         }
         lines = [f"**{name}:** {'Configured' if value else 'Not configured'}"
                  for name, value in values.items()]
