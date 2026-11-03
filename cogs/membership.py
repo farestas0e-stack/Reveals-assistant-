@@ -141,9 +141,11 @@ class MembershipManager(commands.Cog):
                     continue
 
                 member_b = guild_b.get_member(user_id)
+                removed_from_b = False
                 if member_b:
                     try:
                         await member_b.kick(reason="Membership expired; Mentorship role absent in Server A")
+                        removed_from_b = True
                     except (discord.Forbidden, discord.HTTPException):
                         log.exception("Could not kick expired member %s", user_id)
 
@@ -151,7 +153,7 @@ class MembershipManager(commands.Cog):
                 await self.bot.database.add_audit_event(
                     guild_a.id, "membership_expired_access_removed",
                     target_id=user_id,
-                    details={"server_b_kicked": bool(member_b), "reason": "expiry passed and Mentorship role absent"},
+                    details={"server_b_kicked": removed_from_b, "reason": "expiry passed and Mentorship role absent"},
                 )
                 renewal_url = await self.bot.database.get_setting("superprofile_renewal_url")
                 delivered = False
