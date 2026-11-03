@@ -215,8 +215,11 @@ class SetupCommands(commands.Cog):
                 ephemeral=True,
             )
             return
-        if role.is_default():
-            await interaction.response.send_message("Choose a role other than @everyone.", ephemeral=True)
+        if role.is_default() or role.managed:
+            await interaction.response.send_message(
+                "Choose a normal, non-managed role other than @everyone.",
+                ephemeral=True,
+            )
             return
         bot_member = interaction.guild.me
         if bot_member is None or not bot_member.guild_permissions.manage_roles:
