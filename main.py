@@ -38,8 +38,8 @@ class MentorshipBot(commands.Bot):
         logger.info("Application commands synchronized.")
 
     async def close(self) -> None:
-        await self.database.close()
         await super().close()
+        await self.database.close()
 
 
 async def main() -> None:
