@@ -95,24 +95,40 @@ class Ticketing(commands.Cog):
         community = self.bot.get_guild(cfg["server_b_id"])
         if community is None or community.me is None:
             return await interaction.response.send_message("Server B is unavailable.", ephemeral=True)
-        invite_channel = next((c for c in community.text_channels
-            if c.permissions_for(community.me).create_instant_invite), None)
-        if invite_channel is None:
-            return await interaction.response.send_message("Bot cannot create invites in Server B.", ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
-        invite = await invite_channel.create_invite(max_uses=1, max_age=86400, unique=True,
-            reason=f"Manually verified purchase by staff member {interaction.user.id}")
-        await database.verify_ticket(interaction.channel_id, email)
-        await database.save_subscription(ticket["user_id"], cfg["server_a_id"], cfg["subscription_days"])
-        await database.approve_ticket(interaction.channel_id)
-        user = await self.bot.fetch_user(ticket["user_id"])
+        role = interaction.guild.get_role(cfg["mentorship_role_id"])
+        if role is None:
+            return await interaction.response.send_message("The configured mentorship role no longer exists.", ephemeral=True)
         try:
-            await user.send(f"Your purchase was approved. Your one-use Server B invite expires in 24 hours: {invite.url}")
-            delivery = "Invite sent by DM."
-        except discord.HTTPException:
-            await interaction.channel.send(f"<@{ticket['user_id']}> Your invite (one use, 24 hours): {invite.url}")
-            delivery = "DM failed; invite posted in this private ticket."
-        await interaction.followup.send(f"Purchase approved. {delivery}", ephemeral=True)
+            member = interaction.guild.get_member(ticket["user_id"]) or await interaction.guild.fetch_member(ticket["user_id"])
+        except discord.NotFound:
+            return await interaction.response.send_message("The student must join Server A before approval.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await database.verify_ticket(interaction.channel_id, email)
+            await database.save_subscription(ticket["user_id"], cfg["server_a_id"], cfg["subscription_days"])
+            if role not in member.roles:
+                # The role-update listener sends the invite and creates a private ticket if DMs are closed.
+                await member.add_roles(role, reason=f"Purchase manually verified by staff member {interaction.user.id}")
+                delivery = "Mentorship role assigned. The bot will send the Server B invite by DM or private ticket."
+            else:
+                invite_channel = next((c for c in community.text_channels
+                    if c.permissions_for(community.me).create_instant_invite), None)
+                if invite_channel is None:
+                    raise RuntimeError("Bot cannot create invites in Server B.")
+                invite = await invite_channel.create_invite(max_uses=1, max_age=86400, unique=True,
+                    reason=f"Manually verified purchase by staff member {interaction.user.id}")
+                user = await self.bot.fetch_user(ticket["user_id"])
+                try:
+                    await user.send(f"Your purchase was approved. Your one-use Server B invite expires in 24 hours: {invite.url}")
+                    delivery = "Invite sent by DM."
+                except discord.HTTPException:
+                    await interaction.channel.send(f"{user.mention} Your one-use invite expires in 24 hours: {invite.url}")
+                    delivery = "DM failed; invite posted in this private ticket."
+            await database.approve_ticket(interaction.channel_id)
+            await interaction.followup.send(f"Purchase approved. {delivery}", ephemeral=True)
+        except (discord.HTTPException, discord.Forbidden, RuntimeError):
+            await interaction.followup.send("Approval failed. Check bot permissions, role hierarchy, and Server B invite permissions before retrying.", ephemeral=True)
+            raise
 
     @app_commands.command(name="close_ticket", description="Close and delete this ticket.")
     @app_commands.checks.has_permissions(manage_channels=True)
