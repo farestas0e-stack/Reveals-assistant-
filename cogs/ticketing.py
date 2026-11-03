@@ -46,15 +46,16 @@ async def create_private_ticket(guild: discord.Guild, member_or_user, cfg: dict,
     await database.add_ticket(channel.id, guild.id, member_or_user.id, kind)
     if submitted_email:
         await database.set_ticket_email(channel.id, submitted_email)
-        await channel.send(
-            f"{member_or_user.mention} **Purchase request received.**\n"
-            f"Submitted payment email: **{submitted_email}**\n\n"
-            "Staff will check this email against the payment record. "
-            "No Server B invite is issued until payment is verified and staff approves this ticket.")
-    else:
-        await channel.send(
-            f"{member_or_user.mention} This is your private {kind} ticket. "
-            "Staff will verify payment before granting access.")
+    title = "Membership purchase ticket" if kind == "purchase" else "Membership renewal ticket"
+    embed = discord.Embed(
+        title=title,
+        description=f"{member_or_user.mention}, this private ticket is open. Use the button below when your request is complete.",
+        color=discord.Color.blurple())
+    if submitted_email:
+        embed.add_field(name="Payment email", value=submitted_email, inline=False)
+    embed.add_field(name="Membership link", value=cfg.get("renewal_url") or "Ask an administrator to configure the membership link.", inline=False)
+    embed.add_field(name="Next step", value="Complete your purchase/renewal using the link above. Staff will verify payment before access is granted.", inline=False)
+    await channel.send(embed=embed, view=TicketControls())
     return channel
 
 
@@ -105,10 +106,30 @@ class PurchasePanel(discord.ui.View):
         await interaction.response.send_modal(PurchaseEmailModal())
 
 
+class TicketControls(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Close ticket", style=discord.ButtonStyle.danger,
+                       emoji="🔒", custom_id="reveals:close_ticket")
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ticket = await database.get_ticket(interaction.channel_id)
+        if not ticket or ticket["guild_id"] != interaction.guild_id:
+            return await interaction.response.send_message("This is not a registered ticket.", ephemeral=True)
+        is_owner = interaction.user.id == ticket["user_id"]
+        is_staff = interaction.user.guild_permissions.manage_channels or interaction.user.guild_permissions.administrator
+        if not (is_owner or is_staff):
+            return await interaction.response.send_message("Only the ticket owner or staff can close this ticket.", ephemeral=True)
+        await database.close_ticket(interaction.channel_id)
+        await interaction.response.send_message("Ticket closed. This channel will now be deleted.")
+        await interaction.channel.delete(reason=f"Ticket closed by {interaction.user}")
+
+
 class Ticketing(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.bot.add_view(PurchasePanel())
+        self.bot.add_view(TicketControls())
 
     @app_commands.command(name="mentorship_panel", description="Post the mentorship purchase panel.")
     @app_commands.checks.has_permissions(administrator=True)
@@ -118,8 +139,12 @@ class Ticketing(commands.Cog):
             return await interaction.response.send_message("Run /setup first.", ephemeral=True)
         if channel.guild.id != cfg["server_a_id"]:
             return await interaction.response.send_message("Select a Server A channel.", ephemeral=True)
-        message = await channel.send(
-            "**Mentorship**\nClick below to open a private purchase form.", view=PurchasePanel())
+        panel = discord.Embed(
+            title="Mentorship Membership",
+            description="Ready to join? Click **Purchase Mentorship** below to open a private ticket and submit your payment email.",
+            color=discord.Color.blurple())
+        panel.add_field(name="Membership link", value=cfg.get("renewal_url") or "Contact an administrator for the purchase link.", inline=False)
+        message = await channel.send(embed=panel, view=PurchasePanel())
         await database.set_config(interaction.guild_id,
                                   panel_channel_id=channel.id, panel_message_id=message.id)
         await interaction.response.send_message("Purchase panel posted.", ephemeral=True)
