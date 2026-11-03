@@ -141,6 +141,14 @@ class MembershipManager(commands.Cog):
                     continue
 
                 member_b = guild_b.get_member(user_id)
+                if member_b is None:
+                    try:
+                        member_b = await guild_b.fetch_member(user_id)
+                    except discord.NotFound:
+                        member_b = None
+                    except (discord.Forbidden, discord.HTTPException):
+                        log.exception("Could not check Server B membership for %s", user_id)
+                        member_b = None
                 removed_from_b = False
                 if member_b:
                     try:
