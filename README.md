@@ -41,7 +41,8 @@ Run `/setup` inside Server A. Select:
 - Server B ID (copy with Developer Mode)
 - Mentorship role in Server A
 - Sales alert channel in Server A
-- Role audit channel in Server A
+- General role audit channel in Server A
+- Separate mentorship role-assigned and role-revoked alert channels in Server A
 - Purchase ticket category in Server A
 - Renewal ticket category in Server A
 - Renewal/payment URL
