@@ -152,7 +152,7 @@ class SetupCommands(commands.Cog):
             else:
                 access_role = guild_b.get_role(int(access_role_id)) if access_role_id.isdigit() else None
                 can_assign_access = bool(
-                    access_role and perms_b.manage_roles and access_role < guild_b.me.top_role
+                    access_role and not access_role.managed and perms_b.manage_roles and access_role < guild_b.me.top_role
                 )
                 checks.append(("Server B access role", can_assign_access,
                                access_role.name if can_assign_access
