@@ -11,7 +11,7 @@ Python 3.10+ Discord bot for a three-server mentorship workflow.
 - Staff-approved purchase creates a one-use, 24-hour Server B invite.
 - Category overflow creates additional ticket categories.
 - Category-wide /broadcast.
-- Server A role audit, ban/kick forwarding, and message-delete forwarding to Server C.
+- Separate mentorship role-assigned and role-revoked alerts in Server A; ban/kick and message-delete forwarding to Server C.
 
 ## Important payment limitation
 There is **no verified Superprofile webhook integration in this repository**. A role assignment is only an alert and must not be treated as proof of payment. For now, staff must independently verify the payment in Superprofile/payment dashboard and then run /approve_purchase in the student's ticket. Do not run that command until payment is confirmed. A real automatic integration requires Superprofile's official webhook documentation, event/signature format, and a webhook secret; none of those credentials should be committed to GitHub.
@@ -41,7 +41,6 @@ Run `/setup` inside Server A. Select:
 - Server B ID (copy with Developer Mode)
 - Mentorship role in Server A
 - Sales alert channel in Server A
-- General role audit channel in Server A
 - Separate mentorship role-assigned and role-revoked alert channels in Server A
 - Purchase ticket category in Server A
 - Renewal ticket category in Server A
