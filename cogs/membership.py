@@ -138,6 +138,14 @@ class MembershipManager(commands.Cog):
                         guild_a.id, user_id, started_at=started, expires_at=None,
                         source=record["source"], active=True,
                     )
+                    # Role still present: preserve access and issue an invite if they
+                    # are no longer in Server B (for example, if a prior invite was missed).
+                    ticket_cog = self.bot.get_cog("TicketManager")
+                    if ticket_cog and member_a:
+                        try:
+                            await ticket_cog.send_server_b_invite(member_a)
+                        except Exception:
+                            log.exception("Could not restore Server B invitation for %s", user_id)
                     continue
 
                 member_b = guild_b.get_member(user_id)
