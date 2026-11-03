@@ -188,6 +188,38 @@ class MembershipManager(commands.Cog):
     async def before_expiry_check(self) -> None:
         await self.bot.wait_until_ready()
 
+    @app_commands.command(name="syncmember", description="Re-check a member's Mentorship role and send their private invite if eligible.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def syncmember(self, interaction: discord.Interaction, member: discord.Member) -> None:
+        if interaction.guild is None or interaction.guild.id != config.SERVER_A_ID:
+            await interaction.response.send_message("Use this command in Server A.", ephemeral=True)
+            return
+        if not any(role.id == config.MENTORSHIP_ROLE_ID for role in member.roles):
+            await self.bot.database.set_subscription_active(interaction.guild.id, member.id, False)
+            await interaction.response.send_message(
+                "This member does not currently have the Mentorship role. No invitation was sent.",
+                ephemeral=True,
+            )
+            return
+        existing = await self.bot.database.get_subscription(interaction.guild.id, member.id)
+        if existing:
+            await self.bot.database.set_subscription_active(interaction.guild.id, member.id, True)
+        else:
+            await self.bot.database.upsert_subscription(
+                interaction.guild.id, member.id, started_at=utcnow(), source="admin_sync"
+            )
+        ticket_cog = self.bot.get_cog("TicketManager")
+        if not ticket_cog:
+            await interaction.response.send_message("Ticket/invitation service is unavailable.", ephemeral=True)
+            return
+        sent = await ticket_cog.send_server_b_invite(member)
+        await interaction.response.send_message(
+            "Membership record synchronized. " +
+            ("Invitation delivered or fallback ticket created." if sent
+             else "The invite could not be delivered; check bot permissions and logs."),
+            ephemeral=True,
+        )
+
     @app_commands.command(name="setmembershipexpiry", description="Record a member's UTC membership expiry.")
     @app_commands.checks.has_permissions(administrator=True)
     async def setmembershipexpiry(
