@@ -20,6 +20,7 @@ class SetupCommands(commands.Cog):
         renewal = await self.bot.database.get_setting("superprofile_renewal_url")
         moderation = await self.bot.database.get_setting("moderation_log_channel_id")
         invite_channel = await self.bot.database.get_setting("server_b_invite_channel_id")
+        access_role = await self.bot.database.get_setting("server_b_access_role_id")
         embed = discord.Embed(
             title="Mentorship Bot Setup",
             description="Use the admin commands below to finish configuring the bot.",
@@ -30,6 +31,7 @@ class SetupCommands(commands.Cog):
         embed.add_field(name="Renewal link", value="Configured" if renewal else "Not configured", inline=True)
         embed.add_field(name="Moderation log channel", value="Configured" if moderation else "Not configured", inline=True)
         embed.add_field(name="Server B invite channel", value="Configured" if invite_channel else "Auto-detect", inline=True)
+        embed.add_field(name="Server B access role", value="Configured" if access_role else "Not configured", inline=True)
         embed.add_field(
             name="Commands",
             value=(
@@ -183,10 +185,44 @@ class SetupCommands(commands.Cog):
             "Superprofile renewal": await self.bot.database.get_setting("superprofile_renewal_url"),
             "Server C moderation channel": await self.bot.database.get_setting("moderation_log_channel_id"),
             "Server B invite channel": await self.bot.database.get_setting("server_b_invite_channel_id"),
+            "Server B access role": await self.bot.database.get_setting("server_b_access_role_id"),
         }
         lines = [f"**{name}:** {'Configured' if value else 'Not configured'}"
                  for name, value in values.items()]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @app_commands.command(name="setcommunityrole", description="Choose the Server B role granted to eligible Mentorship members.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def setcommunityrole(
+        self, interaction: discord.Interaction, role: discord.Role
+    ) -> None:
+        if interaction.guild is None or interaction.guild.id != config.SERVER_B_ID:
+            await interaction.response.send_message(
+                "Run this command in Server B and select the private-community access role.",
+                ephemeral=True,
+            )
+            return
+        if role.is_default():
+            await interaction.response.send_message("Choose a role other than @everyone.", ephemeral=True)
+            return
+        bot_member = interaction.guild.me
+        if bot_member is None or not bot_member.guild_permissions.manage_roles:
+            await interaction.response.send_message(
+                "I need Manage Roles in Server B before this role can be assigned.",
+                ephemeral=True,
+            )
+            return
+        if role >= bot_member.top_role:
+            await interaction.response.send_message(
+                "Move the bot's highest role above the selected community access role.",
+                ephemeral=True,
+            )
+            return
+        await self.bot.database.set_setting("server_b_access_role_id", str(role.id))
+        await interaction.response.send_message(
+            f"Eligible members will receive {role.mention} when they join Server B.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="setinvitechannel", description="Choose the Server B channel used to create member invitations.")
     @app_commands.checks.has_permissions(administrator=True)
