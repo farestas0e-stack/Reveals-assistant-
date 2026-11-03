@@ -42,6 +42,7 @@ class SetupCommands(commands.Cog):
                 "• /recordrenewal — record renewal when the role stays assigned\n"
                 "• /setmoderationchannel — choose the Server C log channel\n"
                 "• /setinvitechannel — choose the Server B invite channel\n"
+                "• /setcommunityrole — choose the Server B access role\n"
                 "• /healthcheck — check permissions and server setup"
             ),
             inline=False,
