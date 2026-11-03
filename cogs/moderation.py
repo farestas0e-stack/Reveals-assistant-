@@ -51,7 +51,7 @@ class ModerationLogs(commands.Cog):
                     extra_channel = getattr(entry.extra, "channel", None)
                     if extra_channel and extra_channel.id != channel_id:
                         continue
-                return f"{entry.user} ({entry.user.id})"
+                return f"{entry.user} ({entry.user.id})" if entry.user else "Unknown / unavailable"
         except (discord.Forbidden, discord.HTTPException):
             log.debug("Audit log lookup unavailable", exc_info=True)
         return None
