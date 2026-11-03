@@ -143,7 +143,6 @@ class Ticketing(commands.Cog):
             title="Mentorship Membership",
             description="Ready to join? Click **Purchase Mentorship** below to open a private ticket and submit your payment email.",
             color=discord.Color.blurple())
-        panel.add_field(name="Membership link", value=cfg.get("renewal_url") or "Contact an administrator for the purchase link.", inline=False)
         message = await channel.send(embed=panel, view=PurchasePanel())
         await database.set_config(interaction.guild_id,
                                   panel_channel_id=channel.id, panel_message_id=message.id)
