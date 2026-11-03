@@ -39,7 +39,8 @@ class SetupCommands(commands.Cog):
                 "• /syncmember — re-check role and resend invite\n"
                 "• /recordrenewal — record renewal when the role stays assigned\n"
                 "• /setmoderationchannel — choose the Server C log channel\n"
-                "• /setinvitechannel — choose the Server B invite channel"
+                "• /setinvitechannel — choose the Server B invite channel\\n"
+                "• /healthcheck — check permissions and server setup"
             ),
             inline=False,
         )
