@@ -30,7 +30,10 @@ class MentorshipBot(commands.Bot):
         logger.info("SQLite database initialized.")
         await self.load_extension("cogs.ticket_manager")
         await self.load_extension("cogs.setup")
-        logger.info("Ticket manager and setup commands loaded.")
+        await self.load_extension("cogs.membership")
+        await self.load_extension("cogs.moderation")
+        await self.load_extension("cogs.admin_tools")
+        logger.info("Ticket, setup, membership, moderation and admin extensions loaded.")
         await self.tree.sync()
         logger.info("Application commands synchronized.")
 
