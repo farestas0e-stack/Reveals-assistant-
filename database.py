@@ -7,7 +7,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS guild_config (
  guild_id INTEGER PRIMARY KEY, server_a_id INTEGER, server_b_id INTEGER,
  server_c_id INTEGER, mentorship_role_id INTEGER, sales_channel_id INTEGER,
- audit_channel_id INTEGER, ticket_category_id INTEGER, renewal_category_id INTEGER,
+ audit_channel_id INTEGER, role_assigned_channel_id INTEGER, role_revoked_channel_id INTEGER,
+ ticket_category_id INTEGER, renewal_category_id INTEGER,
  log_channel_id INTEGER, renewal_url TEXT, subscription_days INTEGER NOT NULL DEFAULT 30,
  panel_channel_id INTEGER, panel_message_id INTEGER
 );
@@ -26,6 +27,10 @@ CREATE TABLE IF NOT EXISTS tickets (
 async def init_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(SCHEMA)
+        config_columns = {row[1] for row in await (await db.execute("PRAGMA table_info(guild_config)")).fetchall()}
+        for name in ("role_assigned_channel_id", "role_revoked_channel_id"):
+            if name not in config_columns:
+                await db.execute(f"ALTER TABLE guild_config ADD COLUMN {name} INTEGER")
         columns = {row[1] for row in await (await db.execute("PRAGMA table_info(tickets)")).fetchall()}
         for name in ("approved_at", "closed_at"):
             if name not in columns:
@@ -41,7 +46,7 @@ async def get_config(guild_id: int) -> dict[str, Any] | None:
 
 async def set_config(guild_id: int, **values: Any) -> None:
     allowed = {"server_a_id","server_b_id","server_c_id","mentorship_role_id",
-      "sales_channel_id","audit_channel_id","ticket_category_id","renewal_category_id",
+      "sales_channel_id","audit_channel_id","role_assigned_channel_id","role_revoked_channel_id","ticket_category_id","renewal_category_id",
       "log_channel_id","renewal_url","subscription_days","panel_channel_id","panel_message_id"}
     values = {k:v for k,v in values.items() if k in allowed}
     async with aiosqlite.connect(DB_PATH) as db:
