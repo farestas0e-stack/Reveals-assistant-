@@ -109,26 +109,66 @@ class TicketManager(commands.Cog):
             await interaction.response.send_message(
                 "Please use this panel in the Hub server.", ephemeral=True)
             return
-        existing = await self.bot.database.get_open_ticket_for_user(interaction.guild.id,
-                                                                      interaction.user.id)
+        existing = await self.bot.database.get_open_ticket_for_user(
+            interaction.guild.id, interaction.user.id
+        )
         if existing:
             channel = interaction.guild.get_channel(existing["channel_id"])
             if channel:
                 await interaction.response.send_message(
-                    f"You already have an open ticket: {channel.mention}", ephemeral=True)
+                    f"You already have an open ticket: {channel.mention}", ephemeral=True
+                )
                 return
+
         await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            channel = await self.create_private_ticket(
-                interaction.guild, interaction.user, ticket_type
+        if ticket_type in {"purchase", "renewal"}:
+            setting_key = (
+                "superprofile_checkout_url" if ticket_type == "purchase"
+                else "superprofile_renewal_url"
             )
-            await interaction.followup.send(f"Your private ticket is ready: {channel.mention}",
-                                            ephemeral=True)
+            payment_url = await self.bot.database.get_setting(setting_key)
+            if not payment_url:
+                await interaction.followup.send(
+                    "The payment link has not been configured yet. Please contact an administrator.",
+                    ephemeral=True,
+                )
+                return
+            try:
+                await interaction.user.send(
+                    f"Your {ticket_type} link is ready: {payment_url}"
+                )
+                await interaction.followup.send(
+                    "I've sent your payment link by DM.", ephemeral=True
+                )
+                return
+            except discord.Forbidden:
+                # A private ticket is the fallback when the member has DMs disabled.
+                pass
+
+        try:
+            opening = None
+            if ticket_type in {"purchase", "renewal"}:
+                key = ("superprofile_checkout_url" if ticket_type == "purchase"
+                       else "superprofile_renewal_url")
+                payment_url = await self.bot.database.get_setting(key)
+                if payment_url:
+                    opening = (
+                        f"Hello {interaction.user.mention}. I couldn't send the payment link "
+                        f"by DM, so here it is in your private ticket:\n{payment_url}"
+                    )
+            channel = await self.create_private_ticket(
+                interaction.guild, interaction.user, ticket_type,
+                opening_message=opening,
+            )
+            await interaction.followup.send(
+                f"Your private ticket is ready: {channel.mention}", ephemeral=True
+            )
         except (discord.Forbidden, discord.HTTPException, RuntimeError) as exc:
             log.exception("Could not create ticket")
             await interaction.followup.send(
                 f"I couldn't create your ticket. Please contact staff. ({type(exc).__name__})",
-                ephemeral=True)
+                ephemeral=True,
+            )
 
     async def send_server_b_invite(self, member: discord.Member) -> bool:
         """Send a fresh single-use invite; create a private invitation ticket if DM fails."""
