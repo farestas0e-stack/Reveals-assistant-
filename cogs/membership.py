@@ -70,6 +70,19 @@ class MembershipManager(commands.Cog):
                 await self.bot.database.upsert_subscription(
                     after.guild.id, after.id, started_at=now, source="discord_role"
                 )
+            # A role restoration means the member renewed. Remove any old renewal ticket.
+            open_tickets = await self.bot.database.get_open_tickets_for_user(
+                after.guild.id, after.id
+            )
+            for ticket in open_tickets:
+                if ticket["ticket_type"] == "renewal":
+                    ticket_channel = after.guild.get_channel(ticket["channel_id"])
+                    await self.bot.database.close_ticket(ticket["channel_id"])
+                    if ticket_channel:
+                        try:
+                            await ticket_channel.delete(reason="Mentorship role restored")
+                        except discord.HTTPException:
+                            log.exception("Could not delete renewed member ticket %s", ticket_channel.id)
             title, status, color = "Mentorship role assigned / renewed", "Inactive → Active", discord.Color.green()
             event_type = "mentorship_role_added"
         else:
