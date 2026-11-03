@@ -147,15 +147,18 @@ class MembershipManager(commands.Cog):
                     except discord.NotFound:
                         member_b = None
                     except (discord.Forbidden, discord.HTTPException):
+                        # Keep this expiry record active so the worker retries instead
+                        # of silently leaving an expired member in the private server.
                         log.exception("Could not check Server B membership for %s", user_id)
-                        member_b = None
+                        continue
                 removed_from_b = False
                 if member_b:
                     try:
                         await member_b.kick(reason="Membership expired; Mentorship role absent in Server A")
                         removed_from_b = True
                     except (discord.Forbidden, discord.HTTPException):
-                        log.exception("Could not kick expired member %s", user_id)
+                        log.exception("Could not kick expired member %s; will retry next cycle", user_id)
+                        continue
 
                 await self.bot.database.set_subscription_active(guild_a.id, user_id, False)
                 await self.bot.database.add_audit_event(
