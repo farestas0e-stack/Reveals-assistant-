@@ -199,7 +199,16 @@ class TicketManager(commands.Cog):
         if guild_b is None:
             log.error("Server B is not available to the bot.")
             return False
-        if guild_b.get_member(member.id):
+        member_b = guild_b.get_member(member.id)
+        if member_b is None:
+            try:
+                member_b = await guild_b.fetch_member(member.id)
+            except discord.NotFound:
+                member_b = None
+            except (discord.Forbidden, discord.HTTPException):
+                log.exception("Could not check whether %s is already in Server B", member.id)
+                return False
+        if member_b is not None:
             log.info("Member %s is already in Server B; no invite is needed.", member.id)
             return True
         target_channel = None
