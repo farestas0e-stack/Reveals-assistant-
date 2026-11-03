@@ -106,6 +106,27 @@ class ModerationLogs(commands.Cog):
         ))
 
     @commands.Cog.listener()
+    async def on_bulk_message_delete(self, messages: list[discord.Message]) -> None:
+        if not messages:
+            return
+        first = messages[0]
+        if not first.guild or first.guild.id != config.SERVER_A_ID:
+            return
+        lines = []
+        for message in messages[:8]:
+            body = message.content[:120] if message.content else "[No text content]"
+            lines.append(f"• {message.author} ({message.author.id}): {body}")
+        if len(messages) > 8:
+            lines.append(f"…and {len(messages) - 8} more messages.")
+        embed = self._embed(
+            "Bulk messages deleted",
+            f"**Channel:** {first.channel.mention}\n**Count:** {len(messages)}\n"
+            + "\n".join(lines),
+            discord.Color.orange(),
+        )
+        await self._send(embed)
+
+    @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
         if member.guild.id != config.SERVER_A_ID:
             return
