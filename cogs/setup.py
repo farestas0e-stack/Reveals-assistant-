@@ -150,12 +150,16 @@ class SetupCommands(commands.Cog):
                     and channel.permissions_for(guild_b.me).create_instant_invite), None)
             checks.append(("Server B invite channel", invite_channel is not None,
                            invite_channel.mention if invite_channel else "Set /setinvitechannel or grant Create Invite."))
-        if guild_c:
+        if guild_c and guild_c.me:
             log_id = await self.bot.database.get_setting("moderation_log_channel_id")
             log_channel = guild_c.get_channel(int(log_id)) if log_id and log_id.isdigit() else None
-            checks.append(("Server C moderation channel", isinstance(log_channel, discord.TextChannel),
-                           log_channel.mention if isinstance(log_channel, discord.TextChannel)
-                           else "Run /setmoderationchannel in Server C."))
+            can_log = isinstance(log_channel, discord.TextChannel) and (
+                log_channel.permissions_for(guild_c.me).send_messages
+                and log_channel.permissions_for(guild_c.me).embed_links
+            )
+            checks.append(("Server C moderation channel", can_log,
+                           log_channel.mention if can_log
+                           else "Run /setmoderationchannel and grant Send Messages / Embed Links."))
         checks.append(("Checkout link", bool(await self.bot.database.get_setting("superprofile_checkout_url")),
                        "Set with /setlink in Server A."))
         checks.append(("Renewal link", bool(await self.bot.database.get_setting("superprofile_renewal_url")),
