@@ -1,1 +1,0 @@
-require('../src/db');console.log('Database initialized.');
