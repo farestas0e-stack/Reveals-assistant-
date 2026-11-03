@@ -78,7 +78,7 @@ class TicketManager(commands.Cog):
 
         categories = sorted(
             [c for c in guild.categories if c.name == "Tickets" or
-             re.fullmatch(r"Tickets - Part \\d+", c.name)],
+             re.fullmatch(r"Tickets - Part \d+", c.name)],
             key=lambda c: (0 if c.name == "Tickets" else int(c.name.rsplit(" ", 1)[-1]))
         )
         category = next((c for c in categories if len(c.channels) < 49), None)
