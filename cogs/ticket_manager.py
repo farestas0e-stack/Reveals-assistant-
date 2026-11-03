@@ -190,15 +190,57 @@ class TicketManager(commands.Cog):
                 ephemeral=True,
             )
 
+    async def _create_invitation_fallback(
+        self, member: discord.Member, message: str
+    ) -> bool:
+        guild_a = self.bot.get_guild(config.SERVER_A_ID)
+        if guild_a is None:
+            return False
+        member_a = guild_a.get_member(member.id)
+        if member_a is None:
+            try:
+                member_a = await guild_a.fetch_member(member.id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+
+        existing = await self.bot.database.get_open_tickets_for_user(guild_a.id, member.id)
+        existing_invite = next(
+            (ticket for ticket in existing if ticket["ticket_type"] == "invitation"), None
+        )
+        if existing_invite:
+            channel = guild_a.get_channel(existing_invite["channel_id"])
+            if channel:
+                try:
+                    await channel.send(message)
+                    return True
+                except discord.HTTPException:
+                    log.exception("Could not update invitation ticket %s", channel.id)
+                    return False
+
+        try:
+            ticket = await self.create_private_ticket(
+                guild_a, member_a, "invitation", opening_message=message
+            )
+            log.info("Created invitation ticket %s for %s", ticket.id, member.id)
+            return True
+        except (discord.Forbidden, discord.HTTPException, RuntimeError):
+            log.exception("Could not create invitation fallback ticket for %s", member.id)
+            return False
+
     async def send_server_b_invite(self, member: discord.Member) -> bool:
-        """Send a fresh single-use invite; create a private invitation ticket if DM fails."""
+        """Send a one-use invite, or create a private invitation ticket on any delivery failure."""
         if not any(role.id == config.MENTORSHIP_ROLE_ID for role in member.roles):
             log.warning("Refusing to create an invite for %s without the Mentorship role.", member.id)
             return False
+
         guild_b = self.bot.get_guild(config.SERVER_B_ID)
         if guild_b is None:
-            log.error("Server B is not available to the bot.")
-            return False
+            return await self._create_invitation_fallback(
+                member,
+                "Your membership is active, but I could not reach the private community server "
+                "to generate an invitation. Staff will help you shortly.",
+            )
+
         member_b = guild_b.get_member(member.id)
         if member_b is None:
             try:
@@ -207,10 +249,13 @@ class TicketManager(commands.Cog):
                 member_b = None
             except (discord.Forbidden, discord.HTTPException):
                 log.exception("Could not check whether %s is already in Server B", member.id)
-                return False
+                return await self._create_invitation_fallback(
+                    member, "I could not verify your private community membership. Staff will help you."
+                )
         if member_b is not None:
             log.info("Member %s is already in Server B; no invite is needed.", member.id)
             return True
+
         target_channel = None
         configured_channel = await self.bot.database.get_setting("server_b_invite_channel_id")
         if configured_channel:
@@ -228,17 +273,26 @@ class TicketManager(commands.Cog):
                 if perms.create_instant_invite and perms.view_channel:
                     target_channel = channel
                     break
+
         if target_channel is None:
-            log.error("No Server B channel permits invite creation.")
-            return False
+            return await self._create_invitation_fallback(
+                member,
+                "Your membership is active, but I could not find a Server B channel where I can "
+                "create an invitation. Staff will configure access and help you.",
+            )
+
         try:
             invite = await target_channel.create_invite(
                 max_age=0, max_uses=1, temporary=False,
                 unique=True, reason=f"One-use membership invite for {member.id}"
             )
         except (discord.Forbidden, discord.HTTPException):
-            log.exception("Invite creation failed")
-            return False
+            log.exception("Invite creation failed for %s", member.id)
+            return await self._create_invitation_fallback(
+                member,
+                "Your membership is active, but Discord did not let me generate an invitation. "
+                "Staff will help you shortly.",
+            )
 
         try:
             await member.send(
@@ -247,35 +301,12 @@ class TicketManager(commands.Cog):
             )
             return True
         except discord.HTTPException:
-            guild_a = self.bot.get_guild(config.SERVER_A_ID)
-            if guild_a is None:
-                return False
-            existing = await self.bot.database.get_open_tickets_for_user(guild_a.id, member.id)
-            existing_invite = next((t for t in existing if t["ticket_type"] == "invitation"), None)
-            if existing_invite:
-                existing_channel = guild_a.get_channel(existing_invite["channel_id"])
-                if existing_channel:
-                    try:
-                        await existing_channel.send(f"Your refreshed Server B invitation is: {invite.url}")
-                        return True
-                    except discord.HTTPException:
-                        log.exception("Could not refresh invitation ticket %s", existing_channel.id)
-                        return False
-            try:
-                ticket = await self.create_private_ticket(
-                    guild_a, guild_a.get_member(member.id) or await guild_a.fetch_member(member.id),
-                    "invitation",
-                    opening_message=(
-                        f"Hello <@{member.id}>. Your Server B invitation is below.\n"
-                        f"{invite.url}\n\nThis private ticket will be deleted automatically "
-                        "after you join the private community."
-                    )
-                )
-                log.info("Created invitation ticket %s for %s", ticket.id, member.id)
-                return True
-            except (discord.Forbidden, discord.HTTPException, discord.NotFound, RuntimeError):
-                log.exception("Could not create invitation fallback ticket")
-                return False
+            return await self._create_invitation_fallback(
+                member,
+                f"Hello <@{member.id}>. I could not send the invitation by DM. "
+                f"Use this private invitation instead: {invite.url}\n"
+                "This ticket will be deleted automatically after you join Server B.",
+            )
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
