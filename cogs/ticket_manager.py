@@ -76,7 +76,7 @@ class TicketManager(commands.Cog):
             return False
         role = member.guild.get_role(role_id)
         bot_member = member.guild.me
-        if role is None or bot_member is None:
+        if role is None or role.managed or bot_member is None:
             log.error("Configured Server B access role or bot member is unavailable.")
             return False
         if not bot_member.guild_permissions.manage_roles or role >= bot_member.top_role:
