@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 CREATE TABLE IF NOT EXISTS tickets (
  channel_id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
- ticket_type TEXT NOT NULL, verified_email TEXT, created_at TEXT NOT NULL,
+ ticket_type TEXT NOT NULL, submitted_email TEXT, verified_email TEXT, created_at TEXT NOT NULL,
  approved_at TEXT, closed_at TEXT
 );
 """
@@ -32,7 +32,7 @@ async def init_db() -> None:
             if name not in config_columns:
                 await db.execute(f"ALTER TABLE guild_config ADD COLUMN {name} INTEGER")
         columns = {row[1] for row in await (await db.execute("PRAGMA table_info(tickets)")).fetchall()}
-        for name in ("approved_at", "closed_at"):
+        for name in ("submitted_email", "approved_at", "closed_at"):
             if name not in columns:
                 await db.execute(f"ALTER TABLE tickets ADD COLUMN {name} TEXT")
         await db.commit()
@@ -99,9 +99,9 @@ async def find_open_ticket(guild_id: int, user_id: int, ticket_type: str) -> int
         row = await cur.fetchone()
         return int(row[0]) if row else None
 
-async def verify_ticket(channel_id: int, email: str) -> None:
+async def set_ticket_email(channel_id: int, email: str) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE tickets SET verified_email=? WHERE channel_id=?", (email,channel_id))
+        await db.execute("UPDATE tickets SET submitted_email=? WHERE channel_id=?", (email, channel_id))
         await db.commit()
 
 async def approve_ticket(channel_id: int) -> None:
