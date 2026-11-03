@@ -67,6 +67,8 @@ class TicketManager(commands.Cog):
         *, opening_message: str | None = None,
     ) -> discord.TextChannel:
         staff_role = await self._staff_role(guild)
+        if staff_role is None:
+            raise RuntimeError("Staff role is not configured. An administrator must run /setstaffrole first.")
         bot_member = guild.me
         if bot_member is None:
             raise RuntimeError("The bot member could not be resolved in the server.")
@@ -180,10 +182,16 @@ class TicketManager(commands.Cog):
 
     async def send_server_b_invite(self, member: discord.Member) -> bool:
         """Send a fresh single-use invite; create a private invitation ticket if DM fails."""
+        if not any(role.id == config.MENTORSHIP_ROLE_ID for role in member.roles):
+            log.warning("Refusing to create an invite for %s without the Mentorship role.", member.id)
+            return False
         guild_b = self.bot.get_guild(config.SERVER_B_ID)
         if guild_b is None:
             log.error("Server B is not available to the bot.")
             return False
+        if guild_b.get_member(member.id):
+            log.info("Member %s is already in Server B; no invite is needed.", member.id)
+            return True
         target_channel = None
         for channel in guild_b.text_channels:
             perms = channel.permissions_for(guild_b.me)
@@ -238,6 +246,21 @@ class TicketManager(commands.Cog):
         guild_a = self.bot.get_guild(config.SERVER_A_ID)
         if guild_a is None:
             return
+        member_a = guild_a.get_member(member.id)
+        if member_a is None:
+            try:
+                member_a = await guild_a.fetch_member(member.id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                member_a = None
+        eligible = bool(member_a and any(
+            role.id == config.MENTORSHIP_ROLE_ID for role in member_a.roles
+        ))
+        if not eligible:
+            try:
+                await member.kick(reason="Server B access requires the Mentorship role in Server A")
+            except (discord.Forbidden, discord.HTTPException):
+                log.exception("Could not remove ineligible joiner %s from Server B", member.id)
+            return
         tickets = await self.bot.database.get_open_tickets_for_user(guild_a.id, member.id)
         for ticket in tickets:
             if ticket["ticket_type"] in {"invitation", "renewal"}:
@@ -245,7 +268,7 @@ class TicketManager(commands.Cog):
                 await self.bot.database.close_ticket(ticket["channel_id"])
                 if channel:
                     try:
-                        await channel.delete(reason="Ticket creator successfully joined Server B")
+                        await channel.delete(reason="Eligible ticket creator successfully joined Server B")
                     except discord.HTTPException:
                         log.exception("Could not delete completed onboarding ticket %s", channel.id)
 
