@@ -62,6 +62,18 @@ class ModerationLogs(commands.Cog):
             log.debug("Audit log lookup unavailable", exc_info=True)
         return None
 
+    async def _find_bulk_delete_actor(self, guild: discord.Guild, channel_id: int) -> str | None:
+        try:
+            async for entry in guild.audit_logs(
+                limit=10, action=discord.AuditLogAction.message_bulk_delete
+            ):
+                if entry.target and entry.target.id == channel_id:
+                    if (discord.utils.utcnow() - entry.created_at).total_seconds() <= 30:
+                        return f"{entry.user} ({entry.user.id})" if entry.user else "Unknown / unavailable"
+        except (discord.Forbidden, discord.HTTPException):
+            log.debug("Bulk-delete audit lookup unavailable", exc_info=True)
+        return None
+
     def _embed(self, title: str, description: str, color: discord.Color) -> discord.Embed:
         return discord.Embed(title=title, description=description, color=color,
                              timestamp=discord.utils.utcnow())
@@ -124,9 +136,11 @@ class ModerationLogs(commands.Cog):
             lines.append(f"• {message.author} ({message.author.id}): {body}")
         if len(messages) > 8:
             lines.append(f"…and {len(messages) - 8} more messages.")
+        actor = await self._find_bulk_delete_actor(first.guild, first.channel.id)
         embed = self._embed(
             "Bulk messages deleted",
             f"**Channel:** {first.channel.mention}\n**Count:** {len(messages)}\n"
+            f"**Deleted by:** {actor or 'Unknown / unavailable'}\n"
             + "\n".join(lines),
             discord.Color.orange(),
         )
