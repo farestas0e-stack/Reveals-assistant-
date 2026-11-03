@@ -108,7 +108,7 @@ Run `/setup` and `/setupstatus`.
 
 - When the Mentorship role is added in Server A, the bot records/reactivates the subscription, posts Sales and role-assigned notifications, closes any renewal ticket, and sends a fresh one-use Server B invitation.
 - If the invitation DM fails, the bot creates a private Invitation Ticket in Server A and posts the invitation there.
-- When a ticket creator joins Server B, the bot checks that the member still has the Mentorship role in Server A. Eligible users have their Invitation/Renewal ticket deleted. Ineligible joiners are kicked from Server B and their ticket is not deleted.
+- When a ticket creator joins Server B, the bot checks that the member still has the Mentorship role in Server A. Eligible users have their Purchase/Invitation/Renewal ticket deleted. Ineligible joiners are kicked from Server B and their ticket is not deleted.
 - When the role is removed, the bot logs the change but leaves a recorded expiry job active. At expiry, the bot checks the Server A role again. If it is still present, access is preserved. If absent, the bot removes the member from Server B, sends the renewal URL by DM, and creates a private Renewal Ticket if the DM fails.
 - A role re-added after removal triggers the invitation workflow again.
 - If the bot missed a role event while offline, an administrator can run `/syncmember member:<member>`.
