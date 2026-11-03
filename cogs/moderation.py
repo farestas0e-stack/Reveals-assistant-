@@ -26,9 +26,15 @@ class ModerationLogs(commands.Cog):
             log.warning("Run /setmoderationchannel in Server C before moderation events can be logged.")
             return
         try:
-            channel = server_c.get_channel(int(channel_value))
+            channel_id = int(channel_value)
         except ValueError:
-            channel = None
+            channel_id = 0
+        channel = server_c.get_channel(channel_id) if channel_id else None
+        if channel is None and channel_id:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                channel = None
         if not isinstance(channel, discord.TextChannel):
             log.warning("Configured moderation log channel is missing or is not a text channel.")
             return
