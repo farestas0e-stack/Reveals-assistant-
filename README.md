@@ -94,7 +94,8 @@ Example expiry value: `2027-12-31T23:59:00+00:00`.
 
 ### In Server B
 
-1. Run `/setcommunityrole role:<private community access role>` to grant the member role after verifying their Server A Mentorship role. The bot needs Manage Roles and its highest role must be above the selected role.\n2. Optionally run `/setinvitechannel channel:<invite channel>`.
+1. If Server B channels are restricted by a role, run `/setcommunityrole role:<private community access role>`. The bot needs Manage Roles and its highest role must be above the selected role. This is optional if server membership alone grants channel access.
+2. Optionally run `/setinvitechannel channel:<invite channel>`.
 3. If no channel is selected, the bot searches for a text channel where it has View Channel and Create Instant Invite permissions.
 
 ### In Server C
