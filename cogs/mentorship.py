@@ -48,17 +48,19 @@ class Mentorship(commands.Cog):
         if has:
             await database.save_subscription(after.id, after.guild.id, cfg["subscription_days"])
             sales = after.guild.get_channel(cfg["sales_channel_id"])
-            if isinstance(sales, discord.TextChannel):
-                embed = discord.Embed(
-                    title="Mentorship role assigned",
-                    description="Role assignment alert only; payment is not independently confirmed.",
-                    color=discord.Color.green())
-                embed.add_field(name="Student", value=f"{after.mention} ({after.id})", inline=False)
-                embed.add_field(name="Term", value=f"{cfg['subscription_days']} days", inline=True)
-                try:
-                    await sales.send(embed=embed)
-                except discord.HTTPException:
-                    log.exception("Could not send sales alert.")
+            assigned_log = after.guild.get_channel(cfg.get("role_assigned_channel_id"))
+            embed = discord.Embed(
+                title="Mentorship role assigned",
+                description="Role assignment alert only; payment is not independently confirmed.",
+                color=discord.Color.green())
+            embed.add_field(name="Student", value=f"{after.mention} ({after.id})", inline=False)
+            embed.add_field(name="Term", value=f"{cfg['subscription_days']} days", inline=True)
+            for channel in (sales, assigned_log):
+                if isinstance(channel, discord.TextChannel):
+                    try:
+                        await channel.send(embed=embed)
+                    except discord.HTTPException:
+                        log.exception("Could not send role-assigned alert.")
             if community and community.get_member(after.id) is None:
                 try:
                     await self._deliver_invite(after.guild, after, community, cfg)
@@ -78,6 +80,16 @@ class Mentorship(commands.Cog):
                         await member_b.kick(reason="Mentorship role removed in Server A")
                     except discord.HTTPException:
                         log.exception("Could not remove %s from Server B.", after.id)
+            revoked_log = after.guild.get_channel(cfg.get("role_revoked_channel_id"))
+            if isinstance(revoked_log, discord.TextChannel):
+                embed = discord.Embed(
+                    title="Mentorship role revoked",
+                    description=f"Access was revoked for {after.mention} ({after.id}).",
+                    color=discord.Color.red())
+                try:
+                    await revoked_log.send(embed=embed)
+                except discord.HTTPException:
+                    log.exception("Could not send role-revoked alert.")
             await database.deactivate_subscription(after.id, after.guild.id)
 
     @tasks.loop(minutes=5)
