@@ -126,7 +126,7 @@ class Ticketing(commands.Cog):
 
     @app_commands.command(name="approve_purchase",
                           description="Approve only after independently confirming payment.")
-    @app_commands.checks.has_permissions(manage_channels=True)
+    @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(email="Email verified against the payment receipt")
     async def approve_purchase(self, interaction: discord.Interaction, email: str):
         if interaction.guild is None:
@@ -170,39 +170,26 @@ class Ticketing(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
         try:
+            # This is the manual-payment fallback. Adding the configured role
+            # triggers the same invite workflow as Superprofile role assignment.
             await database.set_ticket_email(interaction.channel_id, email.strip())
             if role not in member.roles:
                 await member.add_roles(
-                    role, reason=f"Payment verified by staff member {interaction.user.id}")
+                    role, reason=f"Payment verified and approved by Administrator {interaction.user.id}")
+                result = "Mentorship role assigned. The role-assignment event will deliver the Server B invite."
+            else:
+                result = "The mentorship role is already assigned. If Superprofile assigned it, the role event has already initiated access delivery."
             await database.save_subscription(
                 ticket["user_id"], cfg["server_a_id"], cfg["subscription_days"])
-            invite_channel = next((c for c in community.text_channels
-                if c.permissions_for(community.me).create_instant_invite), None)
-            if invite_channel is None:
-                raise RuntimeError("Bot cannot create invites in Server B.")
-            invite = await invite_channel.create_invite(
-                max_uses=1, max_age=86400, unique=True,
-                reason=f"Payment verified by staff member {interaction.user.id}")
-            user = await self.bot.fetch_user(ticket["user_id"])
-            try:
-                await user.send(
-                    f"Your mentorship purchase is verified. Your one-use Server B invite "
-                    f"expires in 24 hours: {invite.url}")
-                delivery = "The one-use invite was sent by DM."
-            except discord.HTTPException:
-                await interaction.channel.send(
-                    f"<@{ticket['user_id']}> Your payment was verified. "
-                    f"Your one-use Server B invite expires in 24 hours: {invite.url}")
-                delivery = "DM was unavailable; the invite was posted in this private ticket."
             await database.approve_ticket(interaction.channel_id)
             await interaction.channel.send(
-                f"✅ Payment verified by {interaction.user.mention}. Access approved.")
+                f"✅ Payment approved by Administrator {interaction.user.mention}. {result}")
             await interaction.followup.send(
-                f"Purchase approved. {delivery}", ephemeral=True)
-        except (discord.HTTPException, discord.Forbidden, RuntimeError):
+                f"Purchase approved. {result}", ephemeral=True)
+        except (discord.HTTPException, discord.Forbidden):
             await interaction.followup.send(
-                "Approval could not be completed. Check permissions and retry after confirming "
-                "whether an invite was already delivered.", ephemeral=True)
+                "Approval failed. Check bot permissions and role hierarchy, then retry.",
+                ephemeral=True)
             raise
 
     @app_commands.command(name="close_ticket", description="Close and delete this ticket.")
