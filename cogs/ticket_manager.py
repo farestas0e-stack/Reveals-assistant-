@@ -347,6 +347,27 @@ class TicketManager(commands.Cog):
         if interaction.guild is None or interaction.guild.id != config.SERVER_A_ID:
             await interaction.response.send_message("Use this command in Server A.", ephemeral=True)
             return
+        saved_channel = await self.bot.database.get_setting("panel_channel_id")
+        saved_message = await self.bot.database.get_setting("panel_message_id")
+        if saved_channel and saved_message:
+            existing_channel = self.bot.get_channel(int(saved_channel))
+            if isinstance(existing_channel, discord.TextChannel):
+                try:
+                    await existing_channel.fetch_message(int(saved_message))
+                    await interaction.response.send_message(
+                        "A panel is already saved. Use /editpanel or /refreshpanel, "
+                        "or /deletepanel before creating another.",
+                        ephemeral=True,
+                    )
+                    return
+                except discord.NotFound:
+                    pass
+                except (discord.Forbidden, discord.HTTPException):
+                    await interaction.response.send_message(
+                        "I couldn't check the existing panel. Check my channel permissions.",
+                        ephemeral=True,
+                    )
+                    return
         embed = discord.Embed(
             title="Member Help Desk",
             description="Choose an option below to open a private ticket.",
