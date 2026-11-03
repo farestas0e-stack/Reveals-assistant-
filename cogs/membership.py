@@ -46,7 +46,7 @@ class MembershipManager(commands.Cog):
             ):
                 if entry.target and entry.target.id == member.id:
                     if (discord.utils.utcnow() - entry.created_at).total_seconds() <= 20:
-                        return f"{entry.user} ({entry.user.id})"
+                        return f"{entry.user} ({entry.user.id})" if entry.user else "Unknown / unavailable"
         except (discord.Forbidden, discord.HTTPException):
             pass
         return "Unknown / unavailable"
