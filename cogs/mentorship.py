@@ -23,6 +23,16 @@ class Mentorship(commands.Cog):
                                                    reason="Mentorship access")
         raise RuntimeError("No Server B text channel allows invite creation.")
 
+    async def _deliver_invite(self, source: discord.Guild, user: discord.abc.User,
+                              community: discord.Guild, cfg: dict):
+        invite = await self._make_invite(community)
+        try:
+            await user.send(f"Your one-use Server B invite expires in 24 hours: {invite.url}")
+        except discord.HTTPException:
+            from .ticketing import create_private_ticket
+            ticket = await create_private_ticket(source, user, cfg, "purchase")
+            await ticket.send(f"{user.mention} Your one-use Server B invite expires in 24 hours: {invite.url}")
+
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         cfg = await database.get_config(after.guild.id)
@@ -51,10 +61,9 @@ class Mentorship(commands.Cog):
                     log.exception("Could not send sales alert.")
             if community and community.get_member(after.id) is None:
                 try:
-                    invite = await self._make_invite(community)
-                    await after.send(f"Your one-use Server B invite expires in 24 hours: {invite.url}")
-                except (discord.HTTPException, RuntimeError):
-                    log.exception("Could not issue or DM invite for %s", after.id)
+                    await self._deliver_invite(after.guild, after, community, cfg)
+                except (discord.HTTPException, discord.Forbidden, RuntimeError):
+                    log.exception("Could not issue invite or renewal ticket for %s", after.id)
         else:
             if community:
                 member_b = community.get_member(after.id)
