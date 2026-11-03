@@ -98,6 +98,65 @@ class SetupCommands(commands.Cog):
         label = "Checkout" if link_type.value == "checkout" else "Renewal"
         await self._save_url(interaction, key, label, url)
 
+    @app_commands.command(name="healthcheck", description="Check bot access and required permissions across all three servers.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def healthcheck(self, interaction: discord.Interaction) -> None:
+        guild_a = self.bot.get_guild(config.SERVER_A_ID)
+        guild_b = self.bot.get_guild(config.SERVER_B_ID)
+        guild_c = self.bot.get_guild(config.SERVER_C_ID)
+        checks: list[tuple[str, bool, str]] = []
+
+        checks.append(("Server A connected", guild_a is not None,
+                       "Hub server is reachable." if guild_a else "Bot is not in Server A."))
+        checks.append(("Server B connected", guild_b is not None,
+                       "Private server is reachable." if guild_b else "Bot is not in Server B."))
+        checks.append(("Server C connected", guild_c is not None,
+                       "Moderation server is reachable." if guild_c else "Bot is not in Server C."))
+
+        if guild_a and guild_a.me:
+            perms_a = guild_a.me.guild_permissions
+            checks.append(("Server A Manage Channels", perms_a.manage_channels,
+                           "Required to create/delete ticket channels."))
+            checks.append(("Server A View Audit Log", perms_a.view_audit_log,
+                           "Required to identify moderators and role-change actors."))
+            staff_id = await self.bot.database.get_setting("staff_role_id")
+            staff_role = guild_a.get_role(int(staff_id)) if staff_id and staff_id.isdigit() else None
+            checks.append(("Staff role configured", staff_role is not None,
+                           "Run /setstaffrole in Server A." if staff_role is None else staff_role.name))
+            checks.append(("Mentorship role exists", guild_a.get_role(config.MENTORSHIP_ROLE_ID) is not None,
+                           "The configured Mentorship role must exist in Server A."))
+        if guild_b and guild_b.me:
+            perms_b = guild_b.me.guild_permissions
+            checks.append(("Server B Kick Members", perms_b.kick_members,
+                           "Required to remove expired/ineligible members."))
+            invite_id = await self.bot.database.get_setting("server_b_invite_channel_id")
+            invite_channel = guild_b.get_channel(int(invite_id)) if invite_id and invite_id.isdigit() else None
+            if not isinstance(invite_channel, discord.TextChannel):
+                invite_channel = next((channel for channel in guild_b.text_channels
+                    if channel.permissions_for(guild_b.me).view_channel
+                    and channel.permissions_for(guild_b.me).create_instant_invite), None)
+            checks.append(("Server B invite channel", invite_channel is not None,
+                           invite_channel.mention if invite_channel else "Set /setinvitechannel or grant Create Invite."))
+        if guild_c:
+            log_id = await self.bot.database.get_setting("moderation_log_channel_id")
+            log_channel = guild_c.get_channel(int(log_id)) if log_id and log_id.isdigit() else None
+            checks.append(("Server C moderation channel", isinstance(log_channel, discord.TextChannel),
+                           log_channel.mention if isinstance(log_channel, discord.TextChannel)
+                           else "Run /setmoderationchannel in Server C."))
+        checks.append(("Checkout link", bool(await self.bot.database.get_setting("superprofile_checkout_url")),
+                       "Set with /setlink in Server A."))
+        checks.append(("Renewal link", bool(await self.bot.database.get_setting("superprofile_renewal_url")),
+                       "Set with /setlink in Server A."))
+
+        embed = discord.Embed(title="Bot Health Check", color=discord.Color.blurple())
+        for label, passed, detail in checks:
+            embed.add_field(
+                name=f"{'✅' if passed else '❌'} {label}",
+                value=detail[:900],
+                inline=False,
+            )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @app_commands.command(name="setupstatus", description="Show whether the required settings are configured.")
     @app_commands.checks.has_permissions(administrator=True)
     async def setupstatus(self, interaction: discord.Interaction) -> None:
