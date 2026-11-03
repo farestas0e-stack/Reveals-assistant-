@@ -59,6 +59,9 @@ class SetupCommands(commands.Cog):
         )
 
     async def _save_url(self, interaction: discord.Interaction, key: str, label: str, url: str) -> None:
+        if interaction.guild is None or interaction.guild.id != config.SERVER_A_ID:
+            await interaction.response.send_message("Run payment-link setup in Server A.", ephemeral=True)
+            return
         cleaned = url.strip()
         if not cleaned.startswith("https://") or len(cleaned) > 500:
             await interaction.response.send_message(
