@@ -51,6 +51,9 @@ class TicketManager(commands.Cog):
             if isinstance(child, discord.ui.Button) and labels.get(child.custom_id):
                 child.label = labels[child.custom_id]
 
+    def _in_server_a(self, interaction: discord.Interaction) -> bool:
+        return interaction.guild is not None and interaction.guild.id == config.SERVER_A_ID
+
     async def _setting_int(self, key: str, fallback: int = 0) -> int:
         value = await self.bot.database.get_setting(key)
         try:
@@ -346,6 +349,9 @@ class TicketManager(commands.Cog):
 
     async def _edit_saved_embed(self, interaction: discord.Interaction, *, title: str | None = None,
                                 description: str | None = None, color: str | None = None) -> None:
+        if not self._in_server_a(interaction):
+            await interaction.response.send_message("Use this command in Server A.", ephemeral=True)
+            return
         channel_id = await self.bot.database.get_setting("panel_channel_id")
         message_id = await self.bot.database.get_setting("panel_message_id")
         if not channel_id or not message_id:
@@ -403,6 +409,9 @@ class TicketManager(commands.Cog):
         self, interaction: discord.Interaction,
         button: app_commands.Choice[str], label: str
     ) -> None:
+        if not self._in_server_a(interaction):
+            await interaction.response.send_message("Use this command in Server A.", ephemeral=True)
+            return
         label = label.strip()
         if not label or len(label) > 80:
             await interaction.response.send_message("Button labels must contain 1–80 characters.", ephemeral=True)
@@ -420,6 +429,9 @@ class TicketManager(commands.Cog):
     @app_commands.command(name="refreshpanel", description="Refresh the saved panel buttons and appearance.")
     @app_commands.checks.has_permissions(administrator=True)
     async def refreshpanel(self, interaction: discord.Interaction) -> None:
+        if not self._in_server_a(interaction):
+            await interaction.response.send_message("Use this command in Server A.", ephemeral=True)
+            return
         channel_id = await self.bot.database.get_setting("panel_channel_id")
         message_id = await self.bot.database.get_setting("panel_message_id")
         if not channel_id or not message_id:
@@ -461,6 +473,9 @@ class TicketManager(commands.Cog):
     @app_commands.command(name="deletepanel", description="Delete the saved ticket panel.")
     @app_commands.checks.has_permissions(administrator=True)
     async def deletepanel(self, interaction: discord.Interaction) -> None:
+        if not self._in_server_a(interaction):
+            await interaction.response.send_message("Use this command in Server A.", ephemeral=True)
+            return
         channel_id = await self.bot.database.get_setting("panel_channel_id")
         message_id = await self.bot.database.get_setting("panel_message_id")
         if not channel_id or not message_id:
