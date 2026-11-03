@@ -31,7 +31,8 @@ class SetupCommands(commands.Cog):
                 "• /setstaffrole — choose the staff role\n"
                 "• /setcheckoutlink — save your Superprofile purchase URL\n"
                 "• /setrenewallink — save your Superprofile renewal URL\n"
-                "• /setupstatus — review saved settings"
+                "• /setupstatus — review saved settings\\n"
+                "• /setmoderationchannel — choose the Server C log channel"
             ),
             inline=False,
         )
@@ -78,6 +79,23 @@ class SetupCommands(commands.Cog):
         lines = [f"**{name}:** {'Configured' if value else 'Not configured'}"
                  for name, value in values.items()]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @app_commands.command(name="setmoderationchannel", description="Choose the moderation log channel in Server C.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def setmoderationchannel(
+        self, interaction: discord.Interaction, channel: discord.TextChannel
+    ) -> None:
+        if interaction.guild is None or interaction.guild.id != 1566866397538025552:
+            await interaction.response.send_message(
+                "Run this command in Server C, then select its moderation log channel.",
+                ephemeral=True,
+            )
+            return
+        await self.bot.database.set_setting("moderation_log_channel_id", str(channel.id))
+        await interaction.response.send_message(
+            f"Moderation events will be forwarded to {channel.mention}.",
+            ephemeral=True,
+        )
 
 
 async def setup(bot: commands.Bot) -> None:
