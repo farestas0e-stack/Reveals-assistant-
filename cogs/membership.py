@@ -195,7 +195,6 @@ class MembershipManager(commands.Cog):
             await interaction.response.send_message("Use this command in Server A.", ephemeral=True)
             return
         if not any(role.id == config.MENTORSHIP_ROLE_ID for role in member.roles):
-            await self.bot.database.set_subscription_active(interaction.guild.id, member.id, False)
             await interaction.response.send_message(
                 "This member does not currently have the Mentorship role. No invitation was sent.",
                 ephemeral=True,
