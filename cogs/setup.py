@@ -19,6 +19,7 @@ class SetupCommands(commands.Cog):
         checkout = await self.bot.database.get_setting("superprofile_checkout_url")
         renewal = await self.bot.database.get_setting("superprofile_renewal_url")
         moderation = await self.bot.database.get_setting("moderation_log_channel_id")
+        invite_channel = await self.bot.database.get_setting("server_b_invite_channel_id")
         embed = discord.Embed(
             title="Mentorship Bot Setup",
             description="Use the admin commands below to finish configuring the bot.",
@@ -28,12 +29,14 @@ class SetupCommands(commands.Cog):
         embed.add_field(name="Checkout link", value="Configured" if checkout else "Not configured", inline=True)
         embed.add_field(name="Renewal link", value="Configured" if renewal else "Not configured", inline=True)
         embed.add_field(name="Moderation log channel", value="Configured" if moderation else "Not configured", inline=True)
+        embed.add_field(name="Server B invite channel", value="Configured" if invite_channel else "Auto-detect", inline=True)
         embed.add_field(
             name="Commands",
             value=(
                 "• /setstaffrole — choose the staff role\\n"
                 "• /setlink — save your checkout or renewal URL\\n"
                 "• /setmembershipexpiry — record a member expiry\\n"
+                "• /syncmember — re-check role and resend invite\\n"
                 "• /recordrenewal — record renewal when the role stays assigned\\n"
                 "• /setmoderationchannel — choose the Server C log channel\\n"
                 "• /setinvitechannel — choose the Server B invite channel"
@@ -97,6 +100,7 @@ class SetupCommands(commands.Cog):
             "Superprofile checkout": await self.bot.database.get_setting("superprofile_checkout_url"),
             "Superprofile renewal": await self.bot.database.get_setting("superprofile_renewal_url"),
             "Server C moderation channel": await self.bot.database.get_setting("moderation_log_channel_id"),
+            "Server B invite channel": await self.bot.database.get_setting("server_b_invite_channel_id"),
         }
         lines = [f"**{name}:** {'Configured' if value else 'Not configured'}"
                  for name, value in values.items()]
