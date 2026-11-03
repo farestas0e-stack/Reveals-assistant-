@@ -23,16 +23,6 @@ class Mentorship(commands.Cog):
                                                    reason="Mentorship access")
         raise RuntimeError("No Server B text channel allows invite creation.")
 
-    async def _deliver_invite(self, source: discord.Guild, user: discord.abc.User,
-                              community: discord.Guild, cfg: dict):
-        invite = await self._make_invite(community)
-        try:
-            await user.send(f"Your one-use Server B invite expires in 24 hours: {invite.url}")
-        except discord.HTTPException:
-            from .ticketing import create_private_ticket
-            ticket = await create_private_ticket(source, user, cfg, "purchase")
-            await ticket.send(f"{user.mention} Your one-use Server B invite expires in 24 hours: {invite.url}")
-
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         cfg = await database.get_config(after.guild.id)
@@ -61,11 +51,8 @@ class Mentorship(commands.Cog):
                         await channel.send(embed=embed)
                     except discord.HTTPException:
                         log.exception("Could not send role-assigned alert.")
-            if community and community.get_member(after.id) is None:
-                try:
-                    await self._deliver_invite(after.guild, after, community, cfg)
-                except (discord.HTTPException, discord.Forbidden, RuntimeError):
-                    log.exception("Could not issue invite or renewal ticket for %s", after.id)
+            # Role changes alone never issue invites. Only staff approval after payment
+            # verification in cogs.ticketing.py can deliver Server B access.
         else:
             if community:
                 try:
