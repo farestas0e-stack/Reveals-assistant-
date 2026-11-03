@@ -457,6 +457,15 @@ class TicketManager(commands.Cog):
         if not isinstance(interaction.channel, discord.TextChannel):
             await interaction.response.send_message("Use this inside a ticket channel.", ephemeral=True)
             return
+        cursor = await self.bot.database._db().execute(
+            "SELECT ticket_id FROM tickets WHERE channel_id=? AND status='open'",
+            (interaction.channel.id,),
+        )
+        ticket_row = await cursor.fetchone()
+        await cursor.close()
+        if not ticket_row:
+            await interaction.response.send_message("This channel is not an open bot ticket.", ephemeral=True)
+            return
         staff_id = await self._setting_int("staff_role_id", config.MODERATOR_ROLE_ID)
         is_staff = isinstance(interaction.user, discord.Member) and (
             interaction.user.guild_permissions.administrator or
