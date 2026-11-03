@@ -23,17 +23,15 @@ class MentorshipBot(commands.Bot):
         intents.members = True
         intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
-
-        self.database = BotDatabase(
-            os.getenv("DATABASE_PATH", "data/bot.sqlite3")
-        )
+        self.database = BotDatabase(os.getenv("DATABASE_PATH", "data/bot.sqlite3"))
 
     async def setup_hook(self) -> None:
         await self.database.initialize()
         logger.info("SQLite database initialized.")
-
-        # Extension loading will be added as each cog is created.
-        # Example: await self.load_extension("cogs.mentorship")
+        await self.load_extension("cogs.ticket_manager")
+        logger.info("Ticket manager loaded.")
+        await self.tree.sync()
+        logger.info("Application commands synchronized.")
 
     async def close(self) -> None:
         await self.database.close()
@@ -46,7 +44,6 @@ async def main() -> None:
         raise RuntimeError(
             "Set the DISCORD_BOT_TOKEN environment variable before starting the bot."
         )
-
     bot = MentorshipBot()
     async with bot:
         await bot.start(token)
