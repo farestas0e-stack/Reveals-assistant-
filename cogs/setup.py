@@ -144,6 +144,14 @@ class SetupCommands(commands.Cog):
             perms_b = guild_b.me.guild_permissions
             checks.append(("Server B Kick Members", perms_b.kick_members,
                            "Required to remove expired/ineligible members."))
+            access_role_id = await self.bot.database.get_setting("server_b_access_role_id")
+            access_role = guild_b.get_role(int(access_role_id)) if access_role_id and access_role_id.isdigit() else None
+            can_assign_access = bool(
+                access_role and perms_b.manage_roles and access_role < guild_b.me.top_role
+            )
+            checks.append(("Server B access role", can_assign_access,
+                           access_role.name if can_assign_access
+                           else "Run /setcommunityrole and check Manage Roles / role hierarchy."))
             invite_id = await self.bot.database.get_setting("server_b_invite_channel_id")
             invite_channel = guild_b.get_channel(int(invite_id)) if invite_id and invite_id.isdigit() else None
             if not isinstance(invite_channel, discord.TextChannel):
