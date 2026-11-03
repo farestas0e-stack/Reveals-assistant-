@@ -53,9 +53,8 @@ async def create_private_ticket(guild: discord.Guild, member_or_user, cfg: dict,
         color=discord.Color.blurple())
     if submitted_email:
         embed.add_field(name="Payment email", value=submitted_email, inline=False)
-    embed.add_field(name="Membership link", value=cfg.get("renewal_url") or "Ask an administrator to configure the membership link.", inline=False)
-    embed.add_field(name="Next step", value="Complete your purchase/renewal using the link above. Staff will verify payment before access is granted.", inline=False)
-    await channel.send(embed=embed, view=TicketControls())
+    embed.add_field(name="Next step", value="Use **Buy Membership** below to open the checkout page. Staff will verify payment before access is granted.", inline=False)
+    await channel.send(embed=embed, view=TicketControls(cfg.get("renewal_url")))
     return channel
 
 
@@ -106,13 +105,18 @@ class PurchasePanel(discord.ui.View):
         await interaction.response.send_modal(PurchaseEmailModal())
 
 
-class TicketControls(discord.ui.View):
+class DynamicCloseButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reveals:close_ticket"):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(discord.ui.Button(
+            label="Close ticket", style=discord.ButtonStyle.danger,
+            emoji="🔒", custom_id="reveals:close_ticket"))
 
-    @discord.ui.button(label="Close ticket", style=discord.ButtonStyle.danger,
-                       emoji="🔒", custom_id="reveals:close_ticket")
-    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction,
+                             item: discord.ui.Button, match):
+        return cls()
+
+    async def callback(self, interaction: discord.Interaction):
         ticket = await database.get_ticket(interaction.channel_id)
         if not ticket or ticket["guild_id"] != interaction.guild_id:
             return await interaction.response.send_message("This is not a registered ticket.", ephemeral=True)
@@ -125,11 +129,20 @@ class TicketControls(discord.ui.View):
         await interaction.channel.delete(reason=f"Ticket closed by {interaction.user}")
 
 
+class TicketControls(discord.ui.View):
+    def __init__(self, membership_url: str | None):
+        super().__init__(timeout=None)
+        if membership_url and membership_url.startswith(("https://", "http://")):
+            self.add_item(discord.ui.Button(
+                label="Buy Membership", style=discord.ButtonStyle.link, url=membership_url))
+        self.add_item(DynamicCloseButton())
+
+
 class Ticketing(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.bot.add_view(PurchasePanel())
-        self.bot.add_view(TicketControls())
+        self.bot.add_dynamic_items(DynamicCloseButton)
 
     @app_commands.command(name="mentorship_panel", description="Post the mentorship purchase panel.")
     @app_commands.checks.has_permissions(administrator=True)
