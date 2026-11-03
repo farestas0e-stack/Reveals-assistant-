@@ -198,10 +198,13 @@ class SetupCommands(commands.Cog):
             "Superprofile renewal": await self.bot.database.get_setting("superprofile_renewal_url"),
             "Server C moderation channel": await self.bot.database.get_setting("moderation_log_channel_id"),
             "Server B invite channel": await self.bot.database.get_setting("server_b_invite_channel_id"),
-            "Server B access role": (await self.bot.database.get_setting("server_b_access_role_id")) or "optional",
         }
         lines = [f"**{name}:** {'Configured' if value else 'Not configured'}"
                  for name, value in values.items()]
+        access_role = await self.bot.database.get_setting("server_b_access_role_id")
+        lines.append(
+            f"**Server B access role:** {'Configured' if access_role else 'Optional — not set'}"
+        )
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @app_commands.command(name="setcommunityrole", description="Choose the Server B role granted to eligible Mentorship members.")
