@@ -7,7 +7,8 @@ Python 3.10+ Discord bot for a three-server mentorship workflow.
 - Server B access invites are single-use and expire after 24 hours.
 - Removing the mentorship role in Server A revokes the subscription and attempts to kick the member from Server B.
 - Expired subscriptions are checked every five minutes. The bot attempts the Server B kick, removes the Server A role, then sends a renewal DM. If DMs fail, it opens a private renewal ticket.
-- Persistent mentorship purchase panel with an email modal first, private purchase tickets, staff payment verification, invite delivery only after approval, and ticket closing.
+- Embed-based mentorship purchase panel and embed-based private purchase/renewal tickets, with a close-ticket button.
+- New tickets display the configured membership purchase/renewal link. Role removal sends renewal instructions by DM, with a private renewal-ticket fallback.
 - Assigning the configured mentorship role (including the role granted by Superprofile after payment) is treated as payment verification and triggers a one-use, 24-hour Server B invite. Manual payment approval is available to Administrators only.
 - Category overflow creates additional ticket categories.
 - Category-wide /broadcast.
@@ -51,17 +52,18 @@ Run `/setup` inside Server A. Select:
 The bot must already be in Server B before setup.
 
 Then:
-1. Run `/mentorship_panel` in Server A and select the public panel channel.
-2. Have a test user click Purchase Mentorship and submit their Whop/payment email in the modal.
-3. The bot creates a private ticket and records the submitted email. The configured mentorship role is the payment-verification signal: Superprofile should grant this role only after successful payment. Staff can also verify payment manually.
-4. If manual approval is needed, an Administrator runs `/approve_purchase email:...` in that user's ticket. The verified email must match the submitted email.
-5. Test invite use, expiry, role revocation, subscription expiry, closed DMs, and Server C logs before going live.
+1. Set the `renewal_url` field in `/setup` to the membership purchase/renewal checkout link.
+2. Run `/mentorship_panel` in Server A and select the public panel channel.
+3. Have a test user click Purchase Mentorship and submit their Whop/payment email in the modal.
+4. The bot creates a private ticket and records the submitted email. The configured mentorship role is the payment-verification signal: Superprofile should grant this role only after successful payment. Staff can also verify payment manually.
+5. If manual approval is needed, an Administrator runs `/approve_purchase email:...` in that user's ticket. The verified email must match the submitted email.
+6. Test invite use, expiry, role revocation, subscription expiry, closed DMs, and Server C logs before going live.
 
 ## Commands
 - `/setup` — configure the Server A workflow (Administrator).
 - `/mentorship_panel` — post the purchase panel (Administrator).
 - `/approve_purchase email:<email>` — approve a manually verified purchase (Administrator only).
-- `/close_ticket` — close a registered ticket (Manage Channels).
+- `/close_ticket` — close a registered ticket (Manage Channels); ticket owner and staff can also use the ticket's **Close ticket** button.
 - `/broadcast category:<category> message:<text>` — send to accessible text channels in a category (Administrator).
 
 ## Operational notes
