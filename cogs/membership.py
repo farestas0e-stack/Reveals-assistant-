@@ -226,6 +226,7 @@ class MembershipManager(commands.Cog):
                 ephemeral=True,
             )
             return
+        await interaction.response.defer(ephemeral=True, thinking=True)
         existing = await self.bot.database.get_subscription(interaction.guild.id, member.id)
         if existing:
             await self.bot.database.set_subscription_active(interaction.guild.id, member.id, True)
@@ -235,10 +236,10 @@ class MembershipManager(commands.Cog):
             )
         ticket_cog = self.bot.get_cog("TicketManager")
         if not ticket_cog:
-            await interaction.response.send_message("Ticket/invitation service is unavailable.", ephemeral=True)
+            await interaction.followup.send("Ticket/invitation service is unavailable.", ephemeral=True)
             return
         sent = await ticket_cog.send_server_b_invite(member)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "Membership record synchronized. " +
             ("Invitation delivered or fallback ticket created." if sent
              else "The invite could not be delivered; check bot permissions and logs."),
@@ -286,6 +287,7 @@ class MembershipManager(commands.Cog):
         except ValueError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True, thinking=True)
         await self.bot.database.upsert_subscription(
             interaction.guild.id, member.id, started_at=utcnow(),
             expires_at=expiry, source="admin_recorded_renewal", active=True,
@@ -303,7 +305,7 @@ class MembershipManager(commands.Cog):
         ticket_cog = self.bot.get_cog("TicketManager")
         if ticket_cog:
             await ticket_cog.send_server_b_invite(member)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Renewal recorded for {member.mention}; expiry <t:{int(expiry.timestamp())}:F>.",
             ephemeral=True,
         )
