@@ -8,7 +8,7 @@ Python 3.10+ Discord bot for a three-server mentorship workflow.
 - Removing the mentorship role in Server A revokes the subscription and attempts to kick the member from Server B.
 - Expired subscriptions are checked every five minutes. The bot attempts the Server B kick, removes the Server A role, then sends a renewal DM. If DMs fail, it opens a private renewal ticket.
 - Persistent mentorship purchase panel with an email modal first, private purchase tickets, staff payment verification, invite delivery only after approval, and ticket closing.
-- Staff-approved verified purchase creates and delivers a one-use, 24-hour Server B invite. Role assignment by itself never sends an invite.
+- Assigning the configured mentorship role (including the role granted by Superprofile after payment) is treated as payment verification and triggers a one-use, 24-hour Server B invite. Manual payment approval is available to Administrators only.
 - Category overflow creates additional ticket categories.
 - Category-wide /broadcast.
 - Separate mentorship role-assigned and role-revoked alerts in Server A; ban/kick and message-delete forwarding to Server C.
@@ -53,14 +53,14 @@ The bot must already be in Server B before setup.
 Then:
 1. Run `/mentorship_panel` in Server A and select the public panel channel.
 2. Have a test user click Purchase Mentorship and submit their Whop/payment email in the modal.
-3. The bot creates a private ticket and records the submitted email. Staff checks the actual payment receipt outside Discord (no automatic Whop/Superprofile sync is configured).
-4. In that user's ticket, staff runs `/approve_purchase email:...`.
+3. The bot creates a private ticket and records the submitted email. The configured mentorship role is the payment-verification signal: Superprofile should grant this role only after successful payment. Staff can also verify payment manually.
+4. If manual approval is needed, an Administrator runs `/approve_purchase email:...` in that user's ticket. The verified email must match the submitted email.
 5. Test invite use, expiry, role revocation, subscription expiry, closed DMs, and Server C logs before going live.
 
 ## Commands
 - `/setup` — configure the Server A workflow (Administrator).
 - `/mentorship_panel` — post the purchase panel (Administrator).
-- `/approve_purchase email:<email>` — approve a manually verified purchase (Manage Channels).
+- `/approve_purchase email:<email>` — approve a manually verified purchase (Administrator only).
 - `/close_ticket` — close a registered ticket (Manage Channels).
 - `/broadcast category:<category> message:<text>` — send to accessible text channels in a category (Administrator).
 
@@ -69,5 +69,5 @@ Then:
 - Never commit `.env`, SQLite database files, or payment secrets.
 - SQLite is suitable for a single bot process on one persistent disk. Do not run multiple bot replicas against the same SQLite file.
 - Message-delete forwarding only has message content when Discord.py had the message cached. Discord does not provide deleted message content in every case.
-- The bot cannot verify a payment by email alone, and no Whop/Superprofile sync is configured. Staff must independently confirm the receipt; only ticket approval can create and deliver a Server B invite. Manually adding the mentorship role never sends an invite.
+- The bot treats assignment of the configured mentorship role as the payment-verified signal. Configure Superprofile to grant that role only after successful payment. Manual role assignment also triggers access delivery, so restrict who can assign that role. `/approve_purchase` is a manual fallback restricted to Administrators.
 - Test with a private test server and test account before using paid customers.
