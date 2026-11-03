@@ -1,7 +1,8 @@
 import aiosqlite
+import os
 from typing import Any
 
-DB_PATH = "bot.sqlite3"
+DB_PATH = os.getenv("DB_PATH", "bot.sqlite3")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS guild_config (
  guild_id INTEGER PRIMARY KEY, server_a_id INTEGER, server_b_id INTEGER,
