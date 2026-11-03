@@ -24,29 +24,6 @@ class ModerationAudit(commands.Cog):
         await self._send_to(cfg["server_c_id"], cfg["log_channel_id"], embed)
 
     @commands.Cog.listener()
-    async def on_member_update(self, before, after):
-        cfg = await database.get_config(after.guild.id)
-        if not cfg or after.guild.id != cfg["server_a_id"]:
-            return
-        added = set(after.roles) - set(before.roles)
-        removed = set(before.roles) - set(after.roles)
-        for role, assigned in [(r, True) for r in added] + [(r, False) for r in removed]:
-            embed = discord.Embed(
-                title="🟢 Role assigned" if assigned else "🔴 Role revoked",
-                color=discord.Color.green() if assigned else discord.Color.red())
-            embed.add_field(name="Member", value=f"{after} ({after.id})", inline=False)
-            embed.add_field(name="Role", value=f"{role.name} ({role.id})", inline=False)
-            try:
-                async for entry in after.guild.audit_logs(
-                    limit=10, action=discord.AuditLogAction.member_role_update):
-                    if entry.target and entry.target.id == after.id:
-                        embed.add_field(name="Changed by", value=str(entry.user), inline=False)
-                        break
-            except discord.HTTPException:
-                pass
-            await self._send_to(cfg["server_a_id"], cfg["audit_channel_id"], embed)
-
-    @commands.Cog.listener()
     async def on_member_ban(self, guild, user):
         cfg = await database.get_config(guild.id)
         if cfg and guild.id == cfg["server_a_id"]:
