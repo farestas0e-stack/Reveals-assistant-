@@ -42,6 +42,14 @@ class TicketManager(commands.Cog):
 
     async def cog_load(self) -> None:
         self.bot.add_view(self.panel_view)
+        labels = {
+            "mentorship:ticket:support": await self.bot.database.get_setting("panel_button_support"),
+            "mentorship:ticket:purchase": await self.bot.database.get_setting("panel_button_purchase"),
+            "mentorship:ticket:renewal": await self.bot.database.get_setting("panel_button_renewal"),
+        }
+        for child in self.panel_view.children:
+            if isinstance(child, discord.ui.Button) and labels.get(child.custom_id):
+                child.label = labels[child.custom_id]
 
     async def _setting_int(self, key: str, fallback: int = 0) -> int:
         value = await self.bot.database.get_setting(key)
@@ -252,9 +260,111 @@ class TicketManager(commands.Cog):
             description="Choose an option below to open a private ticket.",
             color=discord.Color.blurple()
         )
-        await interaction.channel.send(embed=embed, view=self.panel_view)
-        await interaction.response.send_message("The persistent ticket panel has been posted.",
-                                                ephemeral=True)
+        message = await interaction.channel.send(embed=embed, view=self.panel_view)
+        await self.bot.database.set_setting("panel_channel_id", str(message.channel.id))
+        await self.bot.database.set_setting("panel_message_id", str(message.id))
+        await interaction.response.send_message("The persistent ticket panel has been posted.", ephemeral=True)
+
+    @app_commands.command(name="editpanel", description="Edit the saved panel title, description and color.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def editpanel(
+        self, interaction: discord.Interaction, title: str | None = None,
+        description: str | None = None, color: str | None = None
+    ) -> None:
+        channel_id = await self.bot.database.get_setting("panel_channel_id")
+        message_id = await self.bot.database.get_setting("panel_message_id")
+        if not channel_id or not message_id:
+            await interaction.response.send_message("Create a panel first with /createpanel.", ephemeral=True)
+            return
+        channel = self.bot.get_channel(int(channel_id))
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message("The saved panel channel is unavailable.", ephemeral=True)
+            return
+        try:
+            message = await channel.fetch_message(int(message_id))
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            await interaction.response.send_message("I couldn't find the saved panel message.", ephemeral=True)
+            return
+        embed = message.embeds[0].copy() if message.embeds else discord.Embed()
+        if title is not None:
+            embed.title = title[:256]
+        if description is not None:
+            embed.description = description[:4000]
+        if color is not None:
+            try:
+                cleaned = color.strip().removeprefix("#")
+                if len(cleaned) not in (6,):
+                    raise ValueError
+                embed.color = discord.Color(int(cleaned, 16))
+            except ValueError:
+                await interaction.response.send_message("Color must be a hex value such as #5865F2.", ephemeral=True)
+                return
+        await message.edit(embed=embed, view=self.panel_view)
+        await interaction.response.send_message("Panel updated.", ephemeral=True)
+
+    @app_commands.command(name="setbutton", description="Change a ticket panel button label.")
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.choices(button=[
+        app_commands.Choice(name="Support", value="support"),
+        app_commands.Choice(name="Purchase", value="purchase"),
+        app_commands.Choice(name="Renewal", value="renewal"),
+    ])
+    async def setbutton(
+        self, interaction: discord.Interaction,
+        button: app_commands.Choice[str], label: str
+    ) -> None:
+        label = label.strip()
+        if not label or len(label) > 80:
+            await interaction.response.send_message("Button labels must contain 1–80 characters.", ephemeral=True)
+            return
+        await self.bot.database.set_setting(f"panel_button_{button.value}", label)
+        custom_id = f"mentorship:ticket:{button.value}"
+        for child in self.panel_view.children:
+            if isinstance(child, discord.ui.Button) and child.custom_id == custom_id:
+                child.label = label
+        await interaction.response.send_message(
+            f"The {button.name} button label is now **{label}**. Use /refreshpanel to update the posted panel.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="refreshpanel", description="Refresh the saved panel buttons and appearance.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def refreshpanel(self, interaction: discord.Interaction) -> None:
+        channel_id = await self.bot.database.get_setting("panel_channel_id")
+        message_id = await self.bot.database.get_setting("panel_message_id")
+        if not channel_id or not message_id:
+            await interaction.response.send_message("Create a panel first with /createpanel.", ephemeral=True)
+            return
+        channel = self.bot.get_channel(int(channel_id))
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message("The saved panel channel is unavailable.", ephemeral=True)
+            return
+        try:
+            message = await channel.fetch_message(int(message_id))
+            await message.edit(view=self.panel_view)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            await interaction.response.send_message("I couldn't refresh the saved panel.", ephemeral=True)
+            return
+        await interaction.response.send_message("Panel refreshed.", ephemeral=True)
+
+    @app_commands.command(name="deletepanel", description="Delete the saved ticket panel.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def deletepanel(self, interaction: discord.Interaction) -> None:
+        channel_id = await self.bot.database.get_setting("panel_channel_id")
+        message_id = await self.bot.database.get_setting("panel_message_id")
+        if not channel_id or not message_id:
+            await interaction.response.send_message("No saved panel was found.", ephemeral=True)
+            return
+        channel = self.bot.get_channel(int(channel_id))
+        if isinstance(channel, discord.TextChannel):
+            try:
+                message = await channel.fetch_message(int(message_id))
+                await message.delete()
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+        await self.bot.database.set_setting("panel_channel_id", "")
+        await self.bot.database.set_setting("panel_message_id", "")
+        await interaction.response.send_message("Saved panel deleted (if it still existed).", ephemeral=True)
 
     @createpanel.error
     async def createpanel_error(self, interaction: discord.Interaction,
