@@ -426,6 +426,27 @@ class TicketManager(commands.Cog):
             return
         await interaction.response.send_message("Panel refreshed.", ephemeral=True)
 
+    @app_commands.command(name="closeticket", description="Close and delete the current ticket (staff/admin).")
+    async def closeticket(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None or interaction.guild.id != config.SERVER_A_ID:
+            await interaction.response.send_message("Use this command in Server A.", ephemeral=True)
+            return
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.response.send_message("Use this inside a ticket channel.", ephemeral=True)
+            return
+        staff_id = await self._setting_int("staff_role_id", config.MODERATOR_ROLE_ID)
+        is_staff = isinstance(interaction.user, discord.Member) and (
+            interaction.user.guild_permissions.administrator or
+            (staff_id and any(role.id == staff_id for role in interaction.user.roles))
+        )
+        if not is_staff:
+            await interaction.response.send_message("Only configured staff can use this command.", ephemeral=True)
+            return
+        channel = interaction.channel
+        await self.bot.database.close_ticket(channel.id)
+        await interaction.response.send_message("Ticket closed. Deleting this channel.", ephemeral=True)
+        await channel.delete(reason=f"Ticket closed by staff member {interaction.user.id}")
+
     @app_commands.command(name="deletepanel", description="Delete the saved ticket panel.")
     @app_commands.checks.has_permissions(administrator=True)
     async def deletepanel(self, interaction: discord.Interaction) -> None:
