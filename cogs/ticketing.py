@@ -231,10 +231,11 @@ class EvidenceReviewView(discord.ui.View):
         try:
             days = 30 if ticket["tenure"] == "monthly" else 90
             # Store the membership record before adding the role so event logs have email/tenure.
+            role_was_already_present = role in member.roles
             await database.save_subscription(
                 member.id, guild.id, days, ticket["tenure"], ticket.get("submitted_email")
             )
-            if role not in member.roles:
+            if not role_was_already_present:
                 await member.add_roles(role, reason=f"Payment approved by administrator {interaction.user.id}")
             invite = await invite_channel.create_invite(
                 max_uses=1, max_age=86400, unique=True,
@@ -284,8 +285,10 @@ class EvidenceReviewView(discord.ui.View):
         embed.add_field(name="Discord user", value=f"{member} ({member.id})", inline=False)
         embed.add_field(name="Email", value=ticket.get("submitted_email") or "Not supplied", inline=True)
         embed.add_field(name="Tenure", value=ticket["tenure"].title(), inline=True)
-        for channel_id in (cfg.get("sales_channel_id"), cfg.get("role_assigned_channel_id")):
-            channel = guild.get_channel(channel_id) if channel_id else None
+        # A new role assignment is logged by the role-update listener to both configured
+        # role-assigned and sales channels. If the role already existed, write the sale log here.
+        if role_was_already_present:
+            channel = guild.get_channel(cfg.get("sales_channel_id")) if cfg.get("sales_channel_id") else None
             if isinstance(channel, discord.TextChannel):
                 try:
                     await channel.send(embed=embed, view=LogActionsView(member.id, guild.id))
