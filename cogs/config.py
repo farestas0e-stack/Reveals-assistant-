@@ -115,7 +115,7 @@ class Config(commands.Cog):
             log_channel_id=log_id
         )
         await interaction.response.send_message(
-            "Configuration saved. Single membership checkout, payment approval, role logs and Server B access are configured.",
+            "Configuration saved. Membership role assignment triggers automatic payment verification and Server B access.",
             ephemeral=True
         )
 
