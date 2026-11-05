@@ -5,8 +5,12 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import database
 
-load_dotenv()
-logging.basicConfig(level=logging.INFO)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"), override=False)
+logging.basicConfig(
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
 log = logging.getLogger("reveals-assistant")
 
 intents = discord.Intents.default()
@@ -18,10 +22,18 @@ intents.messages = True
 class RevealsBot(commands.Bot):
     async def setup_hook(self):
         await database.init_db()
-        for extension in ("cogs.config", "cogs.mentorship", "cogs.ticketing",
-                          "cogs.broadcast", "cogs.moderation"):
+        extensions = (
+            "cogs.config",
+            "cogs.mentorship",
+            "cogs.ticketing",
+            "cogs.broadcast",
+            "cogs.moderation",
+        )
+        for extension in extensions:
             await self.load_extension(extension)
+            log.info("Loaded extension %s", extension)
         await self.tree.sync()
+        log.info("Global application commands synced")
 
 bot = RevealsBot(command_prefix="!", intents=intents)
 
@@ -32,5 +44,5 @@ async def on_ready():
 if __name__ == "__main__":
     token = os.getenv("DISCORD_TOKEN")
     if not token:
-        raise RuntimeError("Set DISCORD_TOKEN in the environment.")
+        raise RuntimeError("Set DISCORD_TOKEN in the hosting environment.")
     bot.run(token, log_handler=None)
