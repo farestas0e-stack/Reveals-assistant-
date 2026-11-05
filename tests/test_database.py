@@ -32,10 +32,10 @@ class DatabaseWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await database.claim_ticket_review(112))
 
     async def test_subscription_term_and_inactive_lookup(self):
-        await database.save_subscription(333, 222, 90, "quarterly", "buyer@example.com")
+        await database.save_subscription(333, 222, 30, "monthly", "buyer@example.com")
         active = await database.get_subscription(333, 222)
         self.assertIsNotNone(active)
-        self.assertEqual(active["tenure"], "quarterly")
+        self.assertEqual(active["tenure"], "monthly")
         self.assertEqual(active["email"], "buyer@example.com")
         self.assertEqual(active["active"], 1)
         await database.deactivate_subscription(333, 222)
