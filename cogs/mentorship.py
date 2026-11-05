@@ -8,158 +8,93 @@ log = logging.getLogger("reveals-assistant.mentorship")
 class Mentorship(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.expiry_check.start()
+        self.role_verification.start()
 
     def cog_unload(self):
-        self.expiry_check.cancel()
+        self.role_verification.cancel()
 
-    async def _make_invite(self, guild: discord.Guild) -> discord.Invite:
-        me = guild.me
-        if me is None:
-            raise RuntimeError("Bot member is unavailable in Server B.")
-        for channel in guild.text_channels:
-            if channel.permissions_for(me).create_instant_invite:
-                return await channel.create_invite(max_uses=1, max_age=86400, unique=True,
-                                                   reason="Mentorship access")
-        raise RuntimeError("No Server B text channel allows invite creation.")
-
-    async def _deliver_invite(self, source: discord.Guild, user: discord.Member,
-                              community: discord.Guild, cfg: dict):
-        invite = await self._make_invite(community)
+    async def _kick_from_community(self, source: discord.Guild, user_id: int, reason: str):
+        cfg = await database.get_config(source.id)
+        if not cfg:
+            return
+        community = self.bot.get_guild(cfg["server_b_id"])
+        if community is None:
+            return
         try:
-            await user.send(
-                f"Your mentorship payment is verified. Your one-use Server B invite "
-                f"expires in 24 hours: {invite.url}")
+            member = community.get_member(user_id) or await community.fetch_member(user_id)
+        except discord.NotFound:
+            member = None
         except discord.HTTPException:
-            from .ticketing import create_private_ticket
-            ticket = await create_private_ticket(source, user, cfg, "purchase")
-            await ticket.send(
-                f"{user.mention} Your payment-verified, one-use Server B invite "
-                f"expires in 24 hours: {invite.url}")
+            log.exception("Could not fetch Server B member %s", user_id)
+            return
+        if member:
+            try:
+                await member.kick(reason=reason)
+            except discord.HTTPException:
+                log.exception("Could not kick %s from Server B", user_id)
+
+    async def _offboard(self, source: discord.Guild, user_id: int, cfg: dict, reason: str):
+        await self._kick_from_community(source, user_id, reason)
+        try:
+            user = await self.bot.fetch_user(user_id)
+            await user.send(f"Your mentorship access has ended. Renew here: {cfg.get('renewal_url') or cfg.get('monthly_url') or 'Please contact staff.'}")
+        except discord.HTTPException:
+            try:
+                from .ticketing import create_private_ticket
+                user = await self.bot.fetch_user(user_id)
+                await create_private_ticket(source, user, cfg, "renewal")
+            except (discord.HTTPException, discord.Forbidden, RuntimeError):
+                log.exception("Could not send offboarding instructions to %s", user_id)
+        await database.deactivate_subscription(user_id, source.id)
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         cfg = await database.get_config(after.guild.id)
-        if not cfg or after.guild.id != cfg["server_a_id"]:
+        if not cfg or after.guild.id != cfg.get("server_a_id"):
             return
-        role = after.guild.get_role(cfg["mentorship_role_id"])
-        if role is None:
+        role = after.guild.get_role(cfg.get("mentorship_role_id"))
+        if role is None or ((role in before.roles) == (role in after.roles)):
             return
-        had, has = role in before.roles, role in after.roles
-        if had == has:
-            return
-        community = self.bot.get_guild(cfg["server_b_id"])
-        if has:
-            await database.save_subscription(after.id, after.guild.id, cfg["subscription_days"])
-            sales = after.guild.get_channel(cfg["sales_channel_id"])
-            assigned_log = after.guild.get_channel(cfg.get("role_assigned_channel_id"))
-            embed = discord.Embed(
-                title="Mentorship role assigned",
-                description="The configured mentorship role was assigned. This role assignment is treated as payment verification.",
-                color=discord.Color.green())
-            embed.add_field(name="Student", value=f"{after.mention} ({after.id})", inline=False)
-            embed.add_field(name="Term", value=f"{cfg['subscription_days']} days", inline=True)
-            for channel in (sales, assigned_log):
+        if role in after.roles:
+            # A role grant is logged, but never independently grants Server B access.
+            embed = discord.Embed(title="Mentorship role assigned", color=discord.Color.green())
+            embed.add_field(name="Discord user", value=f"{after} ({after.id})", inline=False)
+            embed.add_field(name="Email / tenure", value="Awaiting approved ticket evidence", inline=False)
+            for key in ("role_assigned_channel_id", "sales_channel_id"):
+                channel = after.guild.get_channel(cfg.get(key))
                 if isinstance(channel, discord.TextChannel):
-                    try:
-                        await channel.send(embed=embed)
-                    except discord.HTTPException:
-                        log.exception("Could not send role-assigned alert.")
-            # Superprofile grants this role after successful payment. Manual role
-            # assignment is also treated as verified access by this workflow.
-            if community and community.get_member(after.id) is None:
-                try:
-                    await self._deliver_invite(after.guild, after, community, cfg)
-                except (discord.HTTPException, discord.Forbidden, RuntimeError):
-                    log.exception("Could not deliver verified invite for %s", after.id)
+                    await channel.send(embed=embed)
         else:
-            if community:
-                try:
-                    member_b = community.get_member(after.id) or await community.fetch_member(after.id)
-                except discord.NotFound:
-                    member_b = None
-                except discord.HTTPException:
-                    log.exception("Could not look up %s in Server B.", after.id)
-                    member_b = None
-                if member_b:
-                    try:
-                        await member_b.kick(reason="Mentorship role removed in Server A")
-                    except discord.HTTPException:
-                        log.exception("Could not remove %s from Server B.", after.id)
-            revoked_log = after.guild.get_channel(cfg.get("role_revoked_channel_id"))
-            if isinstance(revoked_log, discord.TextChannel):
-                embed = discord.Embed(
-                    title="Mentorship role revoked",
-                    description=f"Access was revoked for {after.mention} ({after.id}).",
-                    color=discord.Color.red())
-                try:
-                    await revoked_log.send(embed=embed)
-                except discord.HTTPException:
-                    log.exception("Could not send role-revoked alert.")
-            await database.deactivate_subscription(after.id, after.guild.id)
-            # Notify the member immediately when the configured role is removed.
-            try:
-                await after.send(f"Your mentorship access was removed. You can renew your membership here: {cfg['renewal_url']}")
-            except discord.HTTPException:
-                try:
-                    from .ticketing import create_private_ticket
-                    await create_private_ticket(after.guild, after, cfg, "renewal")
-                except (discord.HTTPException, discord.Forbidden, RuntimeError):
-                    log.exception("Could not deliver renewal instructions to %s.", after.id)
+            await self._offboard(after.guild, after.id, cfg, "Mentorship role removed in Server A")
+            channel = after.guild.get_channel(cfg.get("role_revoked_channel_id"))
+            if isinstance(channel, discord.TextChannel):
+                embed = discord.Embed(title="Mentorship role revoked", description=f"{after} ({after.id})", color=discord.Color.red())
+                await channel.send(embed=embed)
 
-    @tasks.loop(minutes=5)
-    async def expiry_check(self):
+    @tasks.loop(minutes=20)
+    async def role_verification(self):
         for source in self.bot.guilds:
             cfg = await database.get_config(source.id)
-            if not cfg or cfg["server_a_id"] != source.id:
+            if not cfg or cfg.get("server_a_id") != source.id:
                 continue
-            community = self.bot.get_guild(cfg["server_b_id"])
-            role = source.get_role(cfg["mentorship_role_id"])
-            for user_id in await database.expired_subscriptions(source.id):
-                member_b = None
-                if community:
+            role = source.get_role(cfg.get("mentorship_role_id"))
+            if role is None:
+                continue
+            for sub in await database.active_subscriptions(source.id):
+                member = source.get_member(sub["user_id"])
+                if member is None:
                     try:
-                        member_b = community.get_member(user_id) or await community.fetch_member(user_id)
+                        member = await source.fetch_member(sub["user_id"])
                     except discord.NotFound:
-                        member_b = None
+                        member = None
                     except discord.HTTPException:
-                        log.exception("Could not look up expired member %s in Server B; retrying next cycle.", user_id)
                         continue
-                if member_b:
-                    try:
-                        await member_b.kick(reason="Mentorship subscription expired")
-                    except discord.Forbidden:
-                        log.error("Missing Kick Members permission or role hierarchy for user %s.", user_id)
-                        continue
-                    except discord.HTTPException:
-                        log.exception("Kick failed for expired user %s; retrying next cycle.", user_id)
-                        continue
+                if member is None or role not in member.roles:
+                    await self._offboard(source, sub["user_id"], cfg, "20-minute mentorship role verification failed")
+                    log.info("Offboarded %s after role verification", sub["user_id"])
 
-                member_a = source.get_member(user_id)
-                role_removed = False
-                if member_a and role and role in member_a.roles:
-                    try:
-                        await member_a.remove_roles(role, reason="Mentorship subscription expired")
-                        role_removed = True
-                    except discord.HTTPException:
-                        log.exception("Could not remove expired role from %s.", user_id)
-
-                # If the role was already absent, no member-update event fires, so notify here.
-                if not role_removed:
-                    try:
-                        user = await self.bot.fetch_user(user_id)
-                        await user.send(f"Your mentorship subscription expired. Renew here: {cfg['renewal_url']}")
-                    except discord.HTTPException:
-                        try:
-                            from .ticketing import create_private_ticket
-                            user = await self.bot.fetch_user(user_id)
-                            await create_private_ticket(source, user, cfg, "renewal")
-                        except (discord.HTTPException, discord.Forbidden, RuntimeError):
-                            log.exception("Could not deliver renewal instructions for %s.", user_id)
-                await database.deactivate_subscription(user_id, source.id)
-
-    @expiry_check.before_loop
-    async def before_expiry_check(self):
+    @role_verification.before_loop
+    async def before_role_verification(self):
         await self.bot.wait_until_ready()
 
 async def setup(bot):
