@@ -22,8 +22,7 @@ class Config(commands.Cog):
         role_revoked_channel_id="Role revoked log channel ID in Server A",
         ticket_category_id="Purchase ticket category ID in Server A",
         renewal_category_id="Renewal ticket category ID in Server A",
-        monthly_url="Monthly checkout URL",
-        quarterly_url="Quarterly checkout URL",
+        renewal_url="Single membership / renewal checkout URL",
         staff_role_id="Optional staff role ID in Server A",
         server_c_id="Optional moderation log server ID",
         log_channel_id="Optional moderation log channel ID in Server C"
@@ -33,7 +32,7 @@ class Config(commands.Cog):
         mentorship_role_id: str, sales_channel_id: str,
         role_assigned_channel_id: str, role_revoked_channel_id: str,
         ticket_category_id: str, renewal_category_id: str,
-        monthly_url: str, quarterly_url: str,
+        renewal_url: str,
         staff_role_id: str | None = None, server_c_id: str | None = None,
         log_channel_id: str | None = None
     ):
@@ -54,9 +53,9 @@ class Config(commands.Cog):
         except ValueError:
             return await interaction.response.send_message("Every supplied ID must be numeric.", ephemeral=True)
 
-        if not valid_url(monthly_url) or not valid_url(quarterly_url):
+        if not valid_url(renewal_url):
             return await interaction.response.send_message(
-                "Both checkout links must be valid http:// or https:// URLs.", ephemeral=True
+                "The membership / renewal link must be a valid http:// or https:// URL.", ephemeral=True
             )
         role = guild.get_role(role_id)
         sales = guild.get_channel(sales_id)
@@ -106,12 +105,12 @@ class Config(commands.Cog):
             mentorship_role_id=role_id, sales_channel_id=sales_id,
             role_assigned_channel_id=assigned_id, role_revoked_channel_id=revoked_id,
             ticket_category_id=ticket_cat_id, renewal_category_id=renewal_cat_id,
-            monthly_url=monthly_url.strip(), quarterly_url=quarterly_url.strip(),
-            renewal_url=monthly_url.strip(), staff_role_id=staff_id,
+            monthly_url=renewal_url.strip(), renewal_url=renewal_url.strip(),
+            quarterly_url=None, staff_role_id=staff_id,
             log_channel_id=log_id
         )
         await interaction.response.send_message(
-            "Configuration saved. Monthly/Quarterly checkout, ticketing, role logs and Server B offboarding are configured.",
+            "Configuration saved. Single membership checkout, payment approval, role logs and Server B access are configured.",
             ephemeral=True
         )
 
@@ -133,8 +132,7 @@ class Config(commands.Cog):
         ):
             value = f"<#{cfg[key]}>" if cfg.get(key) else "Missing"
             embed.add_field(name=label, value=value, inline=True)
-        embed.add_field(name="Monthly checkout", value="Configured" if cfg.get("monthly_url") else "Missing", inline=True)
-        embed.add_field(name="Quarterly checkout", value="Configured" if cfg.get("quarterly_url") else "Missing", inline=True)
+        embed.add_field(name="Membership / renewal link", value="Configured" if (cfg.get("renewal_url") or cfg.get("monthly_url")) else "Missing", inline=True)
         embed.add_field(name="Staff role", value=f"<@&{cfg['staff_role_id']}>" if cfg.get("staff_role_id") else "Not set", inline=True)
         embed.add_field(name="Server C logs", value=f"Server {cfg.get('server_c_id')} / <#{cfg.get('log_channel_id')}>" if cfg.get("server_c_id") and cfg.get("log_channel_id") else "Not set", inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
