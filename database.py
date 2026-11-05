@@ -82,9 +82,10 @@ async def set_config(guild_id: int, **values: Any) -> None:
         await db.commit()
 
 async def save_subscription(user_id: int, guild_a_id: int, days: int,
-                            tenure: str = "monthly", email: str | None = None) -> None:
-    if days != 30 or tenure != "monthly":
-        raise ValueError("Only the single 30-day membership term is supported.")
+                            tenure: str, email: str | None = None) -> None:
+    expected_tenure = {30: "30 days", 90: "90 days"}.get(days)
+    if expected_tenure is None or tenure != expected_tenure:
+        raise ValueError("Membership duration must be exactly 30 or 90 days.")
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             INSERT INTO subscriptions
@@ -150,6 +151,17 @@ async def get_ticket(channel_id: int) -> dict[str, Any] | None:
         )).fetchone()
         return dict(row) if row else None
 
+async def find_pending_ticket(guild_id: int, user_id: int) -> dict[str, Any] | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute("""
+            SELECT * FROM tickets
+            WHERE guild_id=? AND user_id=? AND approval_status='pending'
+              AND ticket_type IN ('purchase','renewal')
+            ORDER BY created_at DESC LIMIT 1
+        """, (guild_id, user_id))).fetchone()
+        return dict(row) if row else None
+
 async def find_open_ticket(guild_id: int, user_id: int, kind: str) -> int | None:
     async with aiosqlite.connect(DB_PATH) as db:
         row = await (await db.execute("""
@@ -165,8 +177,8 @@ async def set_ticket_email(channel_id: int, email: str) -> None:
         await db.commit()
 
 async def set_ticket_tenure(channel_id: int, tenure: str) -> None:
-    if tenure != "monthly":
-        raise ValueError("Only the single membership term is supported.")
+    if tenure not in ("30 days", "90 days"):
+        raise ValueError("Membership duration must be 30 or 90 days.")
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE tickets SET tenure=? WHERE channel_id=?", (tenure, channel_id))
         await db.commit()
