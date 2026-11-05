@@ -89,7 +89,10 @@ class Mentorship(commands.Cog):
                 if current_member:
                     try:
                         from .ticketing import create_private_ticket
-                        await create_private_ticket(source, current_member, cfg, "renewal")
+                        await create_private_ticket(
+                            source, current_member, cfg, "renewal",
+                            (sub or {}).get("email")
+                        )
                     except (discord.HTTPException, ValueError):
                         log.exception("Could not create renewal ticket for %s", user_id)
                 else:
