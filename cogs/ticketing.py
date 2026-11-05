@@ -228,16 +228,17 @@ class Ticketing(commands.Cog):
         await database.set_config(interaction.guild_id, panel_channel_id=channel.id, panel_message_id=message.id)
         await interaction.response.send_message("Purchase panel posted.", ephemeral=True)
 
-    @app_commands.command(name="membership_status", description="Check a member's stored membership record.")
+    @app_commands.command(name="membership_status", description="Check role-based membership access.")
     @app_commands.checks.has_permissions(manage_roles=True)
     async def membership_status(self, interaction: discord.Interaction, member: discord.Member):
-        sub = await database.get_subscription(member.id, interaction.guild_id)
-        if not sub:
-            return await interaction.response.send_message("No membership record found.", ephemeral=True)
-        status = "Active" if sub["active"] else "Inactive"
+        cfg = await database.get_config(interaction.guild_id)
+        role = interaction.guild.get_role(cfg.get("mentorship_role_id")) if cfg else None
+        if role is None:
+            return await interaction.response.send_message("The membership role is not configured.", ephemeral=True)
+        active = role in member.roles
+        status = "Active — membership role is assigned" if active else "Inactive — membership role is not assigned"
         await interaction.response.send_message(
-            f"{member} ({member.id}) — {status} — {sub['tenure'].title()} — "
-            f"email: {sub.get('email') or 'unknown'} — expires: {sub['expires_at']}",
+            f"{member} ({member.id}) — {status}. No expiry is calculated by this bot.",
             ephemeral=True
         )
 
