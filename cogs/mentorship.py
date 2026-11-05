@@ -34,7 +34,7 @@ class Mentorship(commands.Cog):
             channel = guild.get_channel(channel_id) if channel_id else None
             if isinstance(channel, discord.TextChannel):
                 try:
-                    await channel.send(embed=embed, view=LogActionsView(user_id))
+                    await channel.send(embed=embed, view=LogActionsView(user_id, guild.id))
                 except discord.HTTPException:
                     log.exception("Could not send mentorship role log to %s", channel.id)
 
