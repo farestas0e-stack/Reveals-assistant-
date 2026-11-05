@@ -126,7 +126,8 @@ class SuperProfileWebhookServer:
 
         try:
             if event_type == "purchase_successful":
-                if role not in member.roles:
+                was_missing_role = role not in member.roles
+                if was_missing_role:
                     mentorship = self.bot.get_cog("Mentorship")
                     if mentorship is None:
                         raise RuntimeError("Mentorship cog is not loaded")
@@ -138,11 +139,12 @@ class SuperProfileWebhookServer:
                     except Exception:
                         mentorship._superprofile_assignments.pop((guild.id, member.id), None)
                         raise
-                result = "role_assigned" if role not in member.roles else "already_has_role"
+                result = "role_assigned" if was_missing_role else "already_has_role"
             else:
-                if role in member.roles:
+                was_present = role in member.roles
+                if was_present:
                     await member.remove_roles(role, reason=f"SuperProfile subscription expired: {event_id}")
-                result = "role_removed" if role not in member.roles else "role_was_absent"
+                result = "role_removed" if was_present else "role_was_absent"
 
             await database.finish_provider_event("superprofile", event_id)
             log.info("Processed SuperProfile event %s for user %s: %s", event_id, member.id, result)
