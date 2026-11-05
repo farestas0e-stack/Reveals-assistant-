@@ -6,20 +6,18 @@ import database
 
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
-
 async def _get_category(guild: discord.Guild, cfg: dict, kind: str):
     key = "renewal_category_id" if kind == "renewal" else "ticket_category_id"
-    category = guild.get_channel(cfg[key]) if cfg.get(key) else None
+    category = guild.get_channel(cfg.get(key)) if cfg.get(key) else None
     prefix = "Renewal Tickets" if kind == "renewal" else "Mentorship Tickets"
     if not isinstance(category, discord.CategoryChannel):
         category = await guild.create_category(prefix)
         await database.set_config(guild.id, **{key: category.id})
     if len(category.channels) >= 49:
-        existing = [c.name for c in guild.categories if c.name.startswith(prefix)]
-        category = await guild.create_category(f"{prefix} - Part {len(existing) + 1}")
+        parts = [c.name for c in guild.categories if c.name.startswith(prefix)]
+        category = await guild.create_category(f"{prefix} - Part {len(parts) + 1}")
         await database.set_config(guild.id, **{key: category.id})
     return category
-
 
 async def create_private_ticket(guild: discord.Guild, member_or_user, cfg: dict,
                                 kind: str, submitted_email: str | None = None):
@@ -27,219 +25,238 @@ async def create_private_ticket(guild: discord.Guild, member_or_user, cfg: dict,
     if existing_id:
         existing = guild.get_channel(existing_id)
         if existing:
-            if submitted_email:
-                await database.set_ticket_email(existing_id, submitted_email)
-                await existing.send(f"Updated payment email submitted: **{submitted_email}**")
             return existing
     category = await _get_category(guild, cfg, kind)
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        member_or_user: discord.PermissionOverwrite(view_channel=True, send_messages=True,
-                                                     read_message_history=True),
+        member_or_user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
     }
     if guild.me:
         overwrites[guild.me] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
-                                                            manage_channels=True, read_message_history=True)
-    channel = await guild.create_text_channel(
-        name=f"{kind}-{member_or_user.id}"[:90], category=category,
-        overwrites=overwrites, reason=f"{kind} ticket")
-    await database.add_ticket(channel.id, guild.id, member_or_user.id, kind)
-    if submitted_email:
-        await database.set_ticket_email(channel.id, submitted_email)
+            manage_channels=True, read_message_history=True)
+    staff_role = guild.get_role(cfg.get("staff_role_id")) if cfg.get("staff_role_id") else None
+    if staff_role:
+        overwrites[staff_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
+            read_message_history=True, manage_messages=True)
+    for role in guild.roles:
+        if role.permissions.administrator:
+            overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                read_message_history=True, manage_messages=True)
+    channel = await guild.create_text_channel(name=f"{kind}-{member_or_user.id}"[:90],
+        category=category, overwrites=overwrites, reason=f"{kind} ticket")
+    await database.add_ticket(channel.id, guild.id, member_or_user.id, kind, submitted_email)
     title = "Membership purchase ticket" if kind == "purchase" else "Membership renewal ticket"
-    embed = discord.Embed(
-        title=title,
-        description=f"{member_or_user.mention}, this private ticket is open. Use the button below when your request is complete.",
+    embed = discord.Embed(title=title,
+        description=f"{member_or_user.mention}, submit your payment using one of the tier buttons. After checkout, upload your payment screenshot here. Staff must approve it before Server B access is issued.",
         color=discord.Color.blurple())
+    embed.add_field(name="Discord user", value=f"{member_or_user} ({member_or_user.id})", inline=False)
     if submitted_email:
-        embed.add_field(name="Payment email", value=submitted_email, inline=False)
-    embed.add_field(name="Next step", value="Use **Buy Membership** below to open the checkout page. Staff will verify payment before access is granted.", inline=False)
-    await channel.send(embed=embed, view=TicketControls(cfg.get("renewal_url")))
+        embed.add_field(name="Submitted payment email", value=submitted_email, inline=False)
+    await channel.send(embed=embed, view=PurchaseTierView())
+    await channel.send("Upload a clear payment receipt screenshot in this ticket after checkout.")
     return channel
 
-
 class PurchaseEmailModal(discord.ui.Modal, title="Purchase Mentorship"):
-    payment_email = discord.ui.TextInput(
-        label="Whop / payment email address",
-        placeholder="you@example.com",
-        required=True,
-        max_length=254)
+    payment_email = discord.ui.TextInput(label="Whop / payment email address",
+        placeholder="you@example.com", required=True, max_length=254)
 
     async def on_submit(self, interaction: discord.Interaction):
         email = str(self.payment_email).strip()
         if not EMAIL_RE.fullmatch(email):
-            return await interaction.response.send_message(
-                "Please enter a valid email address.", ephemeral=True)
-        if interaction.guild is None:
-            return await interaction.response.send_message(
-                "Use this form in Server A.", ephemeral=True)
+            return await interaction.response.send_message("Enter a valid email address.", ephemeral=True)
+        if not interaction.guild:
+            return await interaction.response.send_message("Use this in Server A.", ephemeral=True)
         cfg = await database.get_config(interaction.guild_id)
         if not cfg:
-            return await interaction.response.send_message(
-                "An administrator must run /setup first.", ephemeral=True)
+            return await interaction.response.send_message("An administrator must run /setup first.", ephemeral=True)
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            channel = await create_private_ticket(
-                interaction.guild, interaction.user, cfg, "purchase", email)
-        except (discord.Forbidden, discord.HTTPException):
-            return await interaction.followup.send(
-                "I couldn't create your ticket. Please contact staff.", ephemeral=True)
-        await interaction.followup.send(
-            f"Your private purchase ticket is ready: {channel.mention}", ephemeral=True)
-
+            ticket = await create_private_ticket(interaction.guild, interaction.user, cfg, "purchase", email)
+            await database.set_ticket_email(ticket.id, email)
+        except discord.HTTPException:
+            return await interaction.followup.send("Ticket creation failed. Contact staff.", ephemeral=True)
+        await interaction.followup.send(f"Your private ticket: {ticket.mention}", ephemeral=True)
 
 class PurchasePanel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="Purchase Mentorship", style=discord.ButtonStyle.primary,
-                       custom_id="reveals:mentorship_purchase")
+        custom_id="reveals:mentorship_purchase")
     async def purchase(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.guild is None:
-            return await interaction.response.send_message(
-                "Use this button in Server A.", ephemeral=True)
-        cfg = await database.get_config(interaction.guild_id)
-        if not cfg:
-            return await interaction.response.send_message(
-                "An administrator must run /setup first.", ephemeral=True)
+        if not interaction.guild:
+            return await interaction.response.send_message("Use in Server A.", ephemeral=True)
+        if not await database.get_config(interaction.guild_id):
+            return await interaction.response.send_message("Run /setup first.", ephemeral=True)
         await interaction.response.send_modal(PurchaseEmailModal())
 
-
-class DynamicCloseButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reveals:close_ticket"):
+class PurchaseTierView(discord.ui.View):
     def __init__(self):
-        super().__init__(discord.ui.Button(
-            label="Close ticket", style=discord.ButtonStyle.danger,
-            emoji="🔒", custom_id="reveals:close_ticket"))
-
-    @classmethod
-    async def from_custom_id(cls, interaction: discord.Interaction,
-                             item: discord.ui.Button, match):
-        return cls()
-
-    async def callback(self, interaction: discord.Interaction):
-        ticket = await database.get_ticket(interaction.channel_id)
-        if not ticket or ticket["guild_id"] != interaction.guild_id:
-            return await interaction.response.send_message("This is not a registered ticket.", ephemeral=True)
-        is_owner = interaction.user.id == ticket["user_id"]
-        is_staff = interaction.user.guild_permissions.manage_channels or interaction.user.guild_permissions.administrator
-        if not (is_owner or is_staff):
-            return await interaction.response.send_message("Only the ticket owner or staff can close this ticket.", ephemeral=True)
-        await database.close_ticket(interaction.channel_id)
-        await interaction.response.send_message("Ticket closed. This channel will now be deleted.")
-        await interaction.channel.delete(reason=f"Ticket closed by {interaction.user}")
-
-
-class TicketControls(discord.ui.View):
-    def __init__(self, membership_url: str | None):
         super().__init__(timeout=None)
-        if membership_url and membership_url.startswith(("https://", "http://")):
-            self.add_item(discord.ui.Button(
-                label="Buy Membership", style=discord.ButtonStyle.link, url=membership_url))
-        self.add_item(DynamicCloseButton())
 
+    async def _send_tier(self, interaction: discord.Interaction, tenure: str):
+        ticket = await database.get_ticket(interaction.channel_id)
+        if not ticket or ticket["user_id"] != interaction.user.id:
+            return await interaction.response.send_message("Only the ticket owner can select a plan.", ephemeral=True)
+        cfg = await database.get_config(ticket["guild_id"])
+        url = cfg.get("monthly_url" if tenure == "monthly" else "quarterly_url") if cfg else None
+        if not url or not url.startswith(("https://", "http://")):
+            return await interaction.response.send_message("This checkout link is not configured. Contact staff.", ephemeral=True)
+        await database.set_ticket_tenure(interaction.channel_id, tenure)
+        await interaction.response.send_message(f"{tenure.title()} checkout: {url}", ephemeral=True)
+
+    @discord.ui.button(label="Monthly", style=discord.ButtonStyle.success, custom_id="reveals:tier_monthly")
+    async def monthly(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._send_tier(interaction, "monthly")
+
+    @discord.ui.button(label="Quarterly", style=discord.ButtonStyle.primary, custom_id="reveals:tier_quarterly")
+    async def quarterly(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._send_tier(interaction, "quarterly")
+
+class EvidenceReviewView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def _review(self, interaction: discord.Interaction, approve: bool):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("Only Administrators can review payment evidence.", ephemeral=True)
+        ticket = await database.get_ticket(interaction.channel_id)
+        if not ticket or not ticket.get("evidence_message_id"):
+            return await interaction.response.send_message("No payment evidence is registered in this ticket.", ephemeral=True)
+        if ticket["approval_status"] != "pending":
+            return await interaction.response.send_message("This evidence has already been reviewed.", ephemeral=True)
+        cfg = await database.get_config(ticket["guild_id"])
+        guild = interaction.guild
+        if not cfg or guild is None:
+            return await interaction.response.send_message("Server configuration unavailable.", ephemeral=True)
+        if not approve:
+            await database.reject_ticket(interaction.channel_id)
+            await interaction.response.edit_message(content="Payment evidence rejected by Administrator.", view=None)
+            await interaction.channel.send(f"❌ Payment evidence rejected by {interaction.user.mention}. Please contact staff.")
+            return
+        if not ticket.get("tenure"):
+            return await interaction.response.send_message("The member must select Monthly or Quarterly before approval.", ephemeral=True)
+        role = guild.get_role(cfg["mentorship_role_id"])
+        try:
+            member = guild.get_member(ticket["user_id"]) or await guild.fetch_member(ticket["user_id"])
+        except discord.NotFound:
+            return await interaction.response.send_message("Member is no longer in Server A.", ephemeral=True)
+        if role is None:
+            return await interaction.response.send_message("Configured mentorship role no longer exists.", ephemeral=True)
+        days = 30 if ticket["tenure"] == "monthly" else 90
+        await interaction.response.defer()
+        try:
+            if role not in member.roles:
+                await member.add_roles(role, reason=f"Payment evidence approved by {interaction.user.id}")
+            await database.save_subscription(member.id, guild.id, days, ticket["tenure"], ticket.get("submitted_email"))
+            await database.approve_ticket(interaction.channel_id, ticket.get("submitted_email") or "", ticket["tenure"])
+            community = interaction.client.get_guild(cfg["server_b_id"])
+            if community is None:
+                raise RuntimeError("Server B is unavailable.")
+            invite_channel = next((c for c in community.text_channels
+                if c.permissions_for(community.me).create_instant_invite), None)
+            if invite_channel is None:
+                raise RuntimeError("No Server B channel permits invite creation.")
+            invite = await invite_channel.create_invite(max_uses=1, max_age=86400, unique=True,
+                reason=f"Approved mentorship purchase for {member.id}")
+            try:
+                await member.send(f"Your {ticket['tenure']} payment was approved. One-use Server B invite (24 hours): {invite.url}")
+            except discord.HTTPException:
+                await interaction.channel.send(f"{member.mention} Your approved one-use Server B invite: {invite.url}")
+            await interaction.message.edit(content=f"Payment approved by {interaction.user.mention}. Invite issued.", view=None)
+            embed = discord.Embed(title="Sale approved", color=discord.Color.green())
+            embed.add_field(name="Discord user", value=f"{member} ({member.id})", inline=False)
+            embed.add_field(name="Email", value=ticket.get("submitted_email") or "Not supplied", inline=True)
+            embed.add_field(name="Tenure", value=ticket["tenure"].title(), inline=True)
+            sales = guild.get_channel(cfg.get("sales_channel_id"))
+            assigned = guild.get_channel(cfg.get("role_assigned_channel_id"))
+            for channel in (sales, assigned):
+                if isinstance(channel, discord.TextChannel):
+                    await channel.send(embed=embed, view=LogActionsView())
+            await interaction.followup.send("Payment approved and one-use invite issued.", ephemeral=True)
+        except (discord.HTTPException, discord.Forbidden, RuntimeError) as exc:
+            await interaction.followup.send(f"Approval could not finish: {exc}", ephemeral=True)
+
+    @discord.ui.button(label="Approve Purchase", style=discord.ButtonStyle.success, custom_id="reveals:evidence_approve")
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._review(interaction, True)
+
+    @discord.ui.button(label="Reject Purchase", style=discord.ButtonStyle.danger, custom_id="reveals:evidence_reject")
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._review(interaction, False)
+
+class LogActionsView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Check membership", style=discord.ButtonStyle.secondary, custom_id="reveals:log_check")
+    async def check(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_roles and not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("Staff permission required.", ephemeral=True)
+        await interaction.response.send_message("Use /membership_status in the member's ticket to inspect their recorded plan.", ephemeral=True)
 
 class Ticketing(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.bot.add_view(PurchasePanel())
-        self.bot.add_dynamic_items(DynamicCloseButton)
+        bot.add_view(PurchasePanel())
+        bot.add_view(PurchaseTierView())
+        bot.add_view(EvidenceReviewView())
+        bot.add_view(LogActionsView())
 
-    @app_commands.command(name="mentorship_panel", description="Post the mentorship purchase panel.")
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot or not message.guild or not message.attachments:
+            return
+        ticket = await database.get_ticket(message.channel.id)
+        if not ticket or ticket["approval_status"] != "pending" or ticket["ticket_type"] not in ("purchase", "renewal"):
+            return
+        images = [a for a in message.attachments if (a.content_type or "").startswith("image/")]
+        if not images:
+            return
+        await database.set_evidence(message.channel.id, message.id)
+        cfg = await database.get_config(message.guild.id)
+        embed = discord.Embed(title="Payment screenshot submitted", description=f"User: {message.author} ({message.author.id})\nEmail: {ticket.get('submitted_email') or 'Not supplied'}\nTenure: {(ticket.get('tenure') or 'Not selected').title()}",
+            color=discord.Color.gold())
+        embed.add_field(name="Evidence", value=f"[Open screenshot]({images[0].url})", inline=False)
+        embed.set_image(url=images[0].url)
+        staff_role = message.guild.get_role(cfg.get("staff_role_id")) if cfg and cfg.get("staff_role_id") else None
+        content = staff_role.mention if staff_role else "@here"
+        await message.channel.send(content=content, embed=embed, view=EvidenceReviewView(),
+            allowed_mentions=discord.AllowedMentions(roles=True, everyone=False))
+
+    @app_commands.command(name="mentorship_panel", description="Post the purchase panel.")
     @app_commands.checks.has_permissions(administrator=True)
     async def mentorship_panel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         cfg = await database.get_config(interaction.guild_id)
         if not cfg:
             return await interaction.response.send_message("Run /setup first.", ephemeral=True)
-        if channel.guild.id != cfg["server_a_id"]:
-            return await interaction.response.send_message("Select a Server A channel.", ephemeral=True)
-        panel = discord.Embed(
-            title="Mentorship Membership",
-            description="Ready to join? Click **Purchase Mentorship** below to open a private ticket and submit your payment email.",
+        embed = discord.Embed(title="Mentorship Membership",
+            description="Click below, submit your payment email, then choose Monthly or Quarterly inside your private ticket.",
             color=discord.Color.blurple())
-        message = await channel.send(embed=panel, view=PurchasePanel())
-        await database.set_config(interaction.guild_id,
-                                  panel_channel_id=channel.id, panel_message_id=message.id)
+        message = await channel.send(embed=embed, view=PurchasePanel())
+        await database.set_config(interaction.guild_id, panel_channel_id=channel.id, panel_message_id=message.id)
         await interaction.response.send_message("Purchase panel posted.", ephemeral=True)
 
-    @app_commands.command(name="approve_purchase",
-                          description="Approve only after independently confirming payment.")
-    @app_commands.checks.has_permissions(administrator=True)
-    @app_commands.describe(email="Email verified against the payment receipt")
-    async def approve_purchase(self, interaction: discord.Interaction, email: str):
-        if interaction.guild is None:
-            return await interaction.response.send_message(
-                "Use this command inside the purchase ticket.", ephemeral=True)
-        ticket = await database.get_ticket(interaction.channel_id)
-        if not ticket or ticket["guild_id"] != interaction.guild_id:
-            return await interaction.response.send_message(
-                "This is not a registered ticket.", ephemeral=True)
-        if ticket["ticket_type"] not in ("purchase", "renewal"):
-            return await interaction.response.send_message(
-                "Only purchase or renewal tickets can be approved.", ephemeral=True)
-        if ticket["approved_at"]:
-            return await interaction.response.send_message(
-                "This ticket has already been approved.", ephemeral=True)
-        if not EMAIL_RE.fullmatch(email):
-            return await interaction.response.send_message(
-                "Enter a valid payment email.", ephemeral=True)
-        submitted = ticket.get("submitted_email")
-        if submitted and submitted.casefold() != email.strip().casefold():
-            return await interaction.response.send_message(
-                f"The verified receipt email does not match the submitted email ({submitted}). "
-                "Check the payment record before approving.", ephemeral=True)
-        cfg = await database.get_config(ticket["guild_id"])
-        if not cfg:
-            return await interaction.response.send_message(
-                "Server configuration is missing.", ephemeral=True)
-        community = self.bot.get_guild(cfg["server_b_id"])
-        if community is None or community.me is None:
-            return await interaction.response.send_message(
-                "Server B is unavailable.", ephemeral=True)
-        role = interaction.guild.get_role(cfg["mentorship_role_id"])
-        if role is None:
-            return await interaction.response.send_message(
-                "The configured mentorship role no longer exists.", ephemeral=True)
-        try:
-            member = interaction.guild.get_member(ticket["user_id"]) or await interaction.guild.fetch_member(ticket["user_id"])
-        except discord.NotFound:
-            return await interaction.response.send_message(
-                "The student must join Server A before approval.", ephemeral=True)
-
-        await interaction.response.defer(ephemeral=True)
-        try:
-            # This is the manual-payment fallback. Adding the configured role
-            # triggers the same invite workflow as Superprofile role assignment.
-            await database.set_ticket_email(interaction.channel_id, email.strip())
-            if role not in member.roles:
-                await member.add_roles(
-                    role, reason=f"Payment verified and approved by Administrator {interaction.user.id}")
-                result = "Mentorship role assigned. The role-assignment event will deliver the Server B invite."
-            else:
-                result = "The mentorship role is already assigned. If Superprofile assigned it, the role event has already initiated access delivery."
-            await database.save_subscription(
-                ticket["user_id"], cfg["server_a_id"], cfg["subscription_days"])
-            await database.approve_ticket(interaction.channel_id)
-            await interaction.channel.send(
-                f"✅ Payment approved by Administrator {interaction.user.mention}. {result}")
-            await interaction.followup.send(
-                f"Purchase approved. {result}", ephemeral=True)
-        except (discord.HTTPException, discord.Forbidden):
-            await interaction.followup.send(
-                "Approval failed. Check bot permissions and role hierarchy, then retry.",
-                ephemeral=True)
-            raise
+    @app_commands.command(name="membership_status", description="Check a member's stored membership record.")
+    @app_commands.checks.has_permissions(manage_roles=True)
+    async def membership_status(self, interaction: discord.Interaction, member: discord.Member):
+        cfg = await database.get_config(interaction.guild_id)
+        rows = await database.active_subscriptions(interaction.guild_id)
+        sub = next((r for r in rows if r["user_id"] == member.id), None)
+        if not sub:
+            return await interaction.response.send_message("No active subscription record.", ephemeral=True)
+        await interaction.response.send_message(
+            f"{member} ({member.id}) — {sub['tenure'].title()} — email: {sub.get('email') or 'unknown'} — expires: {sub['expires_at']}", ephemeral=True)
 
     @app_commands.command(name="close_ticket", description="Close and delete this ticket.")
     @app_commands.checks.has_permissions(manage_channels=True)
     async def close_ticket_command(self, interaction: discord.Interaction):
         ticket = await database.get_ticket(interaction.channel_id)
         if not ticket or ticket["guild_id"] != interaction.guild_id:
-            return await interaction.response.send_message(
-                "This is not a registered ticket.", ephemeral=True)
+            return await interaction.response.send_message("Not a registered ticket.", ephemeral=True)
         await database.close_ticket(interaction.channel_id)
-        await interaction.response.send_message("Closing ticket…", ephemeral=True)
+        await interaction.response.send_message("Closing ticket.", ephemeral=True)
         await interaction.channel.delete(reason=f"Ticket closed by {interaction.user}")
-
 
 async def setup(bot):
     await bot.add_cog(Ticketing(bot))
