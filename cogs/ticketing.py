@@ -55,8 +55,8 @@ async def create_private_ticket(guild: discord.Guild, member: discord.Member,
     title = "Membership purchase ticket" if kind == "purchase" else "Membership renewal ticket"
     embed = discord.Embed(
         title=title,
-        description=(f"{member.mention}, choose a plan below. Complete checkout, then "
-                     "upload a clear payment receipt screenshot. Staff approval is required "
+        description=(f"{member.mention}, use the button below to get the membership checkout link. Complete payment, then "
+                     "upload a clear payment receipt screenshot. An Administrator must approve it "
                      "before Server B access is issued."),
         color=discord.Color.blurple()
     )
