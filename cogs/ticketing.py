@@ -228,7 +228,11 @@ class EvidenceReviewView(discord.ui.View):
         try:
             embed = discord.Embed.from_dict(interaction.message.embeds[0].to_dict()) if interaction.message.embeds else discord.Embed()
             embed.title = "Mentorship role assigned — purchase verified"
-            embed.add_field(name="Approved duration", value=tenure, inline=True)
+            duration_index = next((i for i, field in enumerate(embed.fields) if field.name == "Access duration"), None)
+            if duration_index is None:
+                embed.add_field(name="Access duration", value=tenure, inline=True)
+            else:
+                embed.set_field_at(duration_index, name="Access duration", value=tenure, inline=True)
             embed.add_field(name="Purchase verified by", value=interaction.user.mention, inline=True)
             embed.color = discord.Color.green()
             await interaction.message.edit(embed=embed, content="Purchase verified. " + ("One-use invite delivered." if delivered else "Invite delivery needs staff follow-up."), view=LogActionsView(member.id, interaction.guild.id))
