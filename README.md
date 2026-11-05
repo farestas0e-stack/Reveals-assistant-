@@ -1,75 +1,116 @@
 # Reveals Assistant
 
-Python 3.10+ Discord bot for a three-server mentorship workflow.
+A Python 3.10+ Discord bot for a multi-server mentorship membership workflow. It uses discord.py 2.x, asyncio and SQLite (aiosqlite).
 
-## Features
-- Server A mentorship-role assignment creates a subscription record and posts a role-assignment alert.
-- Server B access invites are single-use and expire after 24 hours.
-- Removing the mentorship role in Server A revokes the subscription and attempts to kick the member from Server B.
-- Expired subscriptions are checked every five minutes. The bot attempts the Server B kick, removes the Server A role, then sends a renewal DM. If DMs fail, it opens a private renewal ticket.
-- Embed-based mentorship purchase panel and embed-based private purchase/renewal tickets, with a close-ticket button.
-- New tickets display the configured membership purchase/renewal link. Role removal sends renewal instructions by DM, with a private renewal-ticket fallback.
-- Assigning the configured mentorship role (including the role granted by Superprofile after payment) is treated as payment verification and triggers a one-use, 24-hour Server B invite. Manual payment approval is available to Administrators only.
-- Category overflow creates additional ticket categories.
-- Category-wide /broadcast.
-- Separate mentorship role-assigned and role-revoked alerts in Server A; ban/kick and message-delete forwarding to Server C.
+## Implemented workflow
 
-## Important payment limitation
-There is **no verified Superprofile webhook integration in this repository**. A role assignment is only an alert and must not be treated as proof of payment. For now, staff must independently verify the payment in Superprofile/payment dashboard and then run /approve_purchase in the student's ticket. Do not run that command until payment is confirmed. A real automatic integration requires Superprofile's official webhook documentation, event/signature format, and a webhook secret; none of those credentials should be committed to GitHub.
+- Server A is the sales, purchase-ticket and payment-verification server.
+- Server B is the gated community. A successful staff approval creates a one-use invite that expires after 24 hours.
+- Optional Server C receives moderation events from Server A.
+- /setup stores all server, role, channel, category and checkout settings in SQLite. No server/channel/role IDs are hardcoded.
+- /mentorship_panel posts an embed with a Purchase Mentorship button. The modal collects the buyer's Whop/payment email before creating a private ticket.
+- The ticket provides Monthly and Quarterly checkout links. The buyer uploads a payment screenshot; an embed with Approve/Reject controls appears for staff.
+- Only a Server A Administrator can approve or reject payment evidence. Approval stores a 30-day or 90-day membership, assigns the configured mentorship role and issues a one-use Server B invite.
+- If the member's DMs are closed, the invite is posted in their private ticket. If both delivery paths fail, the approval interaction gives the Administrator the invite URL for manual delivery.
+- Purchase/renewal tickets have a Close ticket button. Ticket categories automatically roll over before reaching Discord's category channel limit.
+- Role assignment and revocation logs are sent to separate channels. Log messages have interactive membership-status and setup-status controls.
+- The bot checks active memberships every 20 minutes. If the configured role disappears or the stored membership expires, it attempts to kick the member from Server B, send renewal instructions by DM, and create a private renewal ticket if DMs fail.
+- /broadcast sends to text channels in a category. Its mention_users option controls whether user mentions are allowed; role and @everyone mentions remain disabled.
+- Optional Server C forwarding supports member bans, detected kicks and cached message deletions.
 
-## 1. Create the Discord application
-1. Create a bot in the Discord Developer Portal and copy its token.
-2. Under Bot > Privileged Gateway Intents, enable **Server Members Intent** and **Message Content Intent**.
-3. Invite the bot to Servers A and B, and Server C if using forwarded logs.
-4. Grant Administrator temporarily for initial setup, or grant the least permissions needed:
-   - Server A: View Channels, Send Messages, Embed Links, Manage Channels, Manage Roles, View Audit Log.
-   - Server B: View Channels, Create Instant Invite, Kick Members.
-   - Server C: View Channels, Send Messages, Embed Links.
-5. Put the bot's highest role above the mentorship role and above members it must kick.
+## Payment provider integration: important limitation
 
-## 2. Configure hosting
-Set environment variables in the host dashboard:
-- DISCORD_TOKEN = bot token
-- LOG_LEVEL = INFO (optional)
+There is no verified SuperProfile or Whop API/webhook integration in this repository. The implemented safe workflow is manual evidence review: the customer submits their payment email and screenshot, and an Administrator verifies the transaction in the provider dashboard before pressing Approve Purchase.
 
-Run command:
-`python main.py`
+Do not configure SuperProfile to grant the mentorship role as an automatic access trigger. Role assignment alone is only logged; it does not create a Server B invite. Server B access is issued only by the ticket approval workflow. To automate provider verification, the provider must supply official webhook documentation, event types, signature verification rules and a webhook secret. These details must not be guessed or committed to GitHub.
 
-Use persistent storage for `bot.sqlite3`. On Railway, attach a persistent volume and set its mount path to `/app/data`, then set `DB_PATH=/app/data/bot.sqlite3` if you choose that path. The default database path is the project directory; it will be lost on hosts with ephemeral filesystems.
+## 1. Discord application and permissions
 
-## 3. Configure the bot in Discord
-Run `/setup` inside Server A. Select:
-- Server B ID (copy with Developer Mode)
-- Mentorship role in Server A
-- Sales alert channel in Server A
-- Separate mentorship role-assigned and role-revoked alert channels in Server A
-- Purchase ticket category in Server A
-- Renewal ticket category in Server A
-- Renewal/payment URL
-- Subscription duration in days
-- Optional Server C ID and its log-channel ID
+Enable these privileged intents in the Discord Developer Portal:
+- Server Members Intent
+- Message Content Intent
 
-The bot must already be in Server B before setup.
+Invite the bot to Server A and Server B (and Server C if used). The bot needs:
 
-Then:
-1. Set the `renewal_url` field in `/setup` to the membership purchase/renewal checkout link.
-2. Run `/mentorship_panel` in Server A and select the public panel channel.
-3. Have a test user click Purchase Mentorship and submit their Whop/payment email in the modal.
-4. The bot creates a private ticket and records the submitted email. The configured mentorship role is the payment-verification signal: Superprofile should grant this role only after successful payment. Staff can also verify payment manually.
-5. If manual approval is needed, an Administrator runs `/approve_purchase email:...` in that user's ticket. The verified email must match the submitted email.
-6. Test invite use, expiry, role revocation, subscription expiry, closed DMs, and Server C logs before going live.
+**Server A**
+- View Channels, Send Messages, Embed Links, Read Message History
+- Manage Channels, Manage Roles
+- Access to the configured ticket categories and log channels
+
+**Server B**
+- View Channels, Create Instant Invite, Kick Members
+
+**Server C (optional)**
+- View Channels, Send Messages, Embed Links
+
+Place the bot's highest role above the mentorship role. Only trusted Administrators should have permission to approve payment screenshots. Keep the bot's permissions and staff roles restricted.
+
+## 2. Hosting and persistent database
+
+Install dependencies with: python -m pip install -r requirements.txt
+
+Start the bot with: python main.py
+
+Environment variables:
+- DISCORD_TOKEN: bot token (secret)
+- DB_PATH: SQLite database path (recommended on Railway: /app/data/bot.sqlite3)
+- LOG_LEVEL: optional, defaults to INFO
+
+On Railway, attach a persistent volume mounted at /app/data and set DB_PATH=/app/data/bot.sqlite3. Do not delete the volume when redeploying. Run only one bot replica against this SQLite database.
+
+## 3. First-time setup in Discord
+
+Run /setup in Server A as an Administrator. Supply:
+1. Server B ID
+2. Mentorship/payment-verified role ID in Server A
+3. Sales log channel ID in Server A
+4. Role-assigned log channel ID in Server A
+5. Role-revoked log channel ID in Server A
+6. Purchase ticket category ID in Server A
+7. Renewal ticket category ID in Server A
+8. Monthly checkout URL
+9. Quarterly checkout URL
+10. Optional staff role ID
+11. Optional Server C ID
+12. Optional Server C log channel ID
+
+Copy IDs with Discord Developer Mode enabled. The bot validates the configured channels, role, Server B membership and core permissions. Then run /setup_status to inspect saved configuration.
+
+Next, run /mentorship_panel and select the public purchase-panel channel.
+
+## 4. Test purchase procedure
+
+Use a test account and test payment method first:
+1. Click Purchase Mentorship and submit the payment email.
+2. Confirm a private ticket is created and only the buyer/staff can view it.
+3. Click Monthly or Quarterly and confirm the matching checkout link is shown.
+4. Upload a test receipt image.
+5. Confirm the evidence embed and review buttons appear.
+6. As an Administrator, reject a test ticket and confirm no role or invite is issued.
+7. For a separate test purchase, verify payment in the provider dashboard and click Approve Purchase.
+8. Confirm the mentorship role is assigned, a subscription is stored and the one-use Server B invite is delivered.
+9. Confirm the invite can only be used once and expires after 24 hours.
+10. Remove the mentorship role and confirm the Server B kick, renewal DM and fallback ticket behavior.
+11. Test with DMs closed and test the 20-minute expiry check.
 
 ## Commands
-- `/setup` — configure the Server A workflow (Administrator).
-- `/mentorship_panel` — post the purchase panel (Administrator).
-- `/approve_purchase email:<email>` — approve a manually verified purchase (Administrator only).
-- `/close_ticket` — close a registered ticket (Manage Channels); ticket owner and staff can also use the ticket's **Close ticket** button.
-- `/broadcast category:<category> message:<text>` — send to accessible text channels in a category (Administrator).
 
-## Operational notes
-- Keep the bot token private. If it is exposed, regenerate it immediately.
-- Never commit `.env`, SQLite database files, or payment secrets.
-- SQLite is suitable for a single bot process on one persistent disk. Do not run multiple bot replicas against the same SQLite file.
-- Message-delete forwarding only has message content when Discord.py had the message cached. Discord does not provide deleted message content in every case.
-- The bot treats assignment of the configured mentorship role as the payment-verified signal. Configure Superprofile to grant that role only after successful payment. Manual role assignment also triggers access delivery, so restrict who can assign that role. `/approve_purchase` is a manual fallback restricted to Administrators.
-- Test with a private test server and test account before using paid customers.
+| Command | Purpose |
+|---|---|
+| /setup | Configure Server A/B/C, role, categories, channels and checkout links (Administrator) |
+| /setup_status | Show saved setup status (Administrator) |
+| /mentorship_panel | Post the purchase panel (Administrator) |
+| /membership_status | Inspect active or inactive membership data (Manage Roles) |
+| /close_ticket | Close and delete the current registered ticket (Manage Channels) |
+| /broadcast | Broadcast to accessible text channels (Administrator) |
+
+Ticket owners can also use the Close ticket button. Payment approval is handled by the buttons on the evidence embed.
+
+## Practical limitations and operations
+
+- Discord role changes and ticket actions require the bot to be online. The scheduled membership verification runs every 20 minutes while the process is running.
+- The bot cannot confirm whether an external payment screenshot is genuine. A human Administrator must independently verify the transaction before approval.
+- SuperProfile and Whop customer records are not currently synchronized automatically. The submitted email is stored for staff review.
+- If a customer leaves Server A before a renewal ticket can be created, the bot posts a staff alert in the sales channel instead.
+- Message-delete forwarding only includes content cached by discord.py; Discord does not provide deleted message content in every case.
+- Never commit .env, bot tokens, webhook secrets or the SQLite database. Rotate the Discord token immediately if it is exposed.
