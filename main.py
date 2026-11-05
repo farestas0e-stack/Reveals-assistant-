@@ -3,13 +3,13 @@ import logging
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from superprofile_webhook import SuperProfileWebhookServer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"), override=False)
 
 # Import after loading .env so DB_PATH is read from the environment.
 import database
+from superprofile_webhook import SuperProfileWebhookServer
 
 logging.basicConfig(
     level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
