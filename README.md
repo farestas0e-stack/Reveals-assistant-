@@ -9,11 +9,11 @@ A Python 3.10+ Discord bot for a multi-server mentorship membership workflow. It
 - Optional Server C receives moderation events from Server A.
 - /setup stores all server, role, channel, category and checkout settings in SQLite. No server/channel/role IDs are hardcoded.
 - /mentorship_panel posts an embed with a Purchase Mentorship button. The modal collects the buyer's Whop/payment email before creating a private ticket.
-- The ticket provides Monthly and Quarterly checkout links. The buyer uploads a payment screenshot; an embed with Approve/Reject controls appears for staff.
-- Only a Server A Administrator can approve or reject payment evidence. Approval stores a 30-day or 90-day membership, assigns the configured mentorship role and issues a one-use Server B invite.
+- The ticket provides one membership checkout link. The buyer uploads a payment screenshot; an embed with Approve/Reject controls appears in both the ticket and sales log.
+- Only a Server A Administrator can approve or reject payment evidence. Approval stores one 30-day access term, assigns the configured mentorship role and issues a one-use Server B invite.
 - If the member's DMs are closed, the invite is posted in their private ticket. If both delivery paths fail, the approval interaction gives the Administrator the invite URL for manual delivery.
 - Purchase/renewal tickets have a Close ticket button. Ticket categories automatically roll over before reaching Discord's category channel limit.
-- Role assignment and revocation logs are sent to separate channels. Log messages have interactive membership-status and setup-status controls.
+- Role assignment and revocation logs are sent to separate channels. Role-assigned logs include membership-status and Send Server B invite controls. Payment approval can be completed from either the ticket or the sales log.
 - The bot checks active memberships every 20 minutes. If the configured role disappears or the stored membership expires, it attempts to kick the member from Server B, send renewal instructions by DM, and create a private renewal ticket if DMs fail.
 - /broadcast sends to text channels in a category. Its mention_users option controls whether user mentions are allowed; role and @everyone mentions remain disabled.
 - Optional Server C forwarding supports member bans, detected kicks and cached message deletions.
@@ -68,11 +68,10 @@ Run /setup in Server A as an Administrator. Supply:
 5. Role-revoked log channel ID in Server A
 6. Purchase ticket category ID in Server A
 7. Renewal ticket category ID in Server A
-8. Monthly checkout URL
-9. Quarterly checkout URL
-10. Optional staff role ID
-11. Optional Server C ID
-12. Optional Server C log channel ID
+8. Single membership / renewal checkout URL
+9. Optional staff role ID
+10. Optional Server C ID
+11. Optional Server C log channel ID
 
 Copy IDs with Discord Developer Mode enabled. The bot validates the configured channels, role, Server B membership and core permissions. Then run /setup_status to inspect saved configuration.
 
@@ -83,7 +82,7 @@ Next, run /mentorship_panel and select the public purchase-panel channel.
 Use a test account and test payment method first:
 1. Click Purchase Mentorship and submit the payment email.
 2. Confirm a private ticket is created and only the buyer/staff can view it.
-3. Click Monthly or Quarterly and confirm the matching checkout link is shown.
+3. Click Get membership link and confirm the single checkout link is shown.
 4. Upload a test receipt image.
 5. Confirm the evidence embed and review buttons appear.
 6. As an Administrator, reject a test ticket and confirm no role or invite is issued.
