@@ -26,8 +26,8 @@ class Mentorship(commands.Cog):
                     continue
                 if (datetime.now(timezone.utc) - entry.created_at).total_seconds() > 90:
                     continue
-                before_roles = {r.id for r in getattr(entry.before, "roles", [])}
-                after_roles = {r.id for r in getattr(entry.after, "roles", [])}
+                before_roles = {r.id for r in (getattr(entry.before, "roles", None) or [])}
+                after_roles = {r.id for r in (getattr(entry.after, "roles", None) or [])}
                 if role_id in after_roles and role_id not in before_roles:
                     return entry.user
         except discord.Forbidden:
