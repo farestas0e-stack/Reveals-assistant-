@@ -408,8 +408,8 @@ class Ticketing(commands.Cog):
                 sales_embed = discord.Embed(
                     title="Payment screenshot submitted",
                     description=(
-                        f"**Submitted by:** {message.author.mention}\\n"
-                        f"**Username:** {discord.utils.escape_markdown(str(message.author))}\\n"
+                        f"**Submitted by:** {message.author.mention}\n"
+                        f"**Username:** {discord.utils.escape_markdown(str(message.author))}\n"
                         f"**User ID:** {message.author.id}"
                     ),
                     color=discord.Color.blurple(),
