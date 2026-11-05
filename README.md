@@ -35,6 +35,7 @@ Invite the bot to Server A and Server B (and Server C if used). The bot needs:
 
 **Server A**
 - View Channels, Send Messages, Embed Links, Read Message History
+- View Audit Log (so the bot can identify who assigned the mentorship role)
 - Manage Channels, Manage Roles
 - Access to the configured ticket categories and log channels
 
