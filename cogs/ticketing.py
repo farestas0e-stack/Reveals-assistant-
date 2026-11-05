@@ -131,7 +131,6 @@ class PurchaseTierView(discord.ui.View):
         url = (cfg.get("renewal_url") or cfg.get("monthly_url")) if cfg else None
         if not url or not url.startswith(("https://", "http://")):
             return await interaction.response.send_message("The membership checkout link is not configured. Contact staff.", ephemeral=True)
-        await database.set_ticket_tenure(interaction.channel_id, "monthly")
         await interaction.response.send_message(f"Membership checkout link: {url}", ephemeral=True)
 
     @discord.ui.button(label="Close ticket", style=discord.ButtonStyle.danger,
@@ -167,106 +166,59 @@ class CloseTicketView(discord.ui.View):
         await interaction.channel.delete(reason=f"Ticket closed by {interaction.user.id}")
 
 class EvidenceReviewView(discord.ui.View):
-    def __init__(self, ticket_channel_id: int | None = None):
-        super().__init__(timeout=None)
-        self.ticket_channel_id = ticket_channel_id
-
-    async def _review(self, interaction: discord.Interaction, approve: bool):
+    async def approve_from_role_log(self, interaction: discord.Interaction, user_id: int, days: int):
         if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message(
-                "Only Administrators can review payment evidence.", ephemeral=True
-            )
-        ticket_channel_id = self.ticket_channel_id or interaction.channel_id
-        ticket = await database.get_ticket(ticket_channel_id)
-        if not ticket or ticket["guild_id"] != interaction.guild_id or not ticket.get("evidence_message_id"):
-            return await interaction.response.send_message(
-                "No payment evidence is registered in this ticket.", ephemeral=True
-            )
-        if ticket["approval_status"] != "pending":
-            return await interaction.response.send_message(
-                "This evidence is already being processed or has been reviewed.", ephemeral=True
-            )
-        if not approve:
-            changed = await database.reject_ticket(ticket_channel_id)
-            if not changed:
-                return await interaction.response.send_message("This ticket was already reviewed.", ephemeral=True)
-            await interaction.response.edit_message(content="Payment evidence rejected by Administrator.", view=None)
-            await interaction.channel.send(
-                f"Payment evidence rejected by {interaction.user.mention}. Please contact staff."
-            )
-            return
-        if ticket.get("tenure") != "monthly":
-            return await interaction.response.send_message(
-                "The member must request the membership checkout link before approval.", ephemeral=True
-            )
-        cfg = await database.get_config(ticket["guild_id"])
-        guild = interaction.guild
-        if not cfg or guild is None:
-            return await interaction.response.send_message("Server configuration unavailable.", ephemeral=True)
-        role = guild.get_role(cfg.get("mentorship_role_id"))
-        community = interaction.client.get_guild(cfg.get("server_b_id"))
-        if role is None or community is None:
-            return await interaction.response.send_message(
-                "Configured mentorship role or Server B is unavailable.", ephemeral=True
-            )
-        try:
-            member = guild.get_member(ticket["user_id"]) or await guild.fetch_member(ticket["user_id"])
-        except discord.NotFound:
-            return await interaction.response.send_message("Member is no longer in Server A.", ephemeral=True)
-        invite_channel = next(
-            (channel for channel in community.text_channels
-             if community.me and channel.permissions_for(community.me).create_instant_invite),
-            None
-        )
+            return await interaction.response.send_message("Only Administrators can verify purchases.", ephemeral=True)
+        if not interaction.guild:
+            return await interaction.response.send_message("Use this inside Server A.", ephemeral=True)
+        if days not in (30, 90):
+            return await interaction.response.send_message("Invalid membership duration.", ephemeral=True)
+        ticket = await database.find_pending_ticket(interaction.guild.id, user_id)
+        if not ticket or not ticket.get("evidence_message_id"):
+            return await interaction.response.send_message("No pending payment screenshot was found. Ask the member to submit it in their private ticket first.", ephemeral=True)
+        cfg = await database.get_config(interaction.guild.id)
+        role = interaction.guild.get_role(cfg.get("mentorship_role_id")) if cfg else None
+        member = interaction.guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await interaction.guild.fetch_member(user_id)
+            except discord.NotFound:
+                return await interaction.response.send_message("Member is no longer in Server A.", ephemeral=True)
+            except discord.HTTPException:
+                return await interaction.response.send_message("Could not fetch the member. Try again.", ephemeral=True)
+        if role is None or role not in member.roles:
+            return await interaction.response.send_message("The configured role has not been assigned yet. Role assignment is handled automatically outside the bot.", ephemeral=True)
+        community = interaction.client.get_guild(cfg.get("server_b_id")) if cfg else None
+        if community is None:
+            return await interaction.response.send_message("Server B is unavailable to the bot.", ephemeral=True)
+        invite_channel = next((ch for ch in community.text_channels if community.me and ch.permissions_for(community.me).create_instant_invite), None)
         if invite_channel is None:
-            return await interaction.response.send_message(
-                "The bot needs Create Invite permission in a Server B text channel.", ephemeral=True
-            )
-        if not await database.claim_ticket_review(ticket_channel_id):
-            return await interaction.response.send_message("This ticket is already being reviewed.", ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
+            return await interaction.response.send_message("The bot needs Create Invite permission in a Server B text channel.", ephemeral=True)
+        if not await database.claim_ticket_review(ticket["channel_id"]):
+            return await interaction.response.send_message("This purchase is already being reviewed or has been processed.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         invite = None
+        tenure = f"{days} days"
         try:
-            days = 30
-            # Store the membership record before adding the role so event logs have email/tenure.
-            role_was_already_present = role in member.roles
-            await database.save_subscription(
-                member.id, guild.id, days, ticket["tenure"], ticket.get("submitted_email")
-            )
-            if not role_was_already_present:
-                await member.add_roles(role, reason=f"Payment approved by administrator {interaction.user.id}")
-            invite = await invite_channel.create_invite(
-                max_uses=1, max_age=86400, unique=True,
-                reason=f"Approved membership for Discord user {member.id}"
-            )
-            await database.finish_ticket_approval(
-                ticket_channel_id, ticket.get("submitted_email") or "", ticket["tenure"]
-            )
+            await database.save_subscription(member.id, interaction.guild.id, days, tenure, ticket.get("submitted_email"))
+            invite = await invite_channel.create_invite(max_uses=1, max_age=86400, unique=True, reason=f"{days}-day purchase approved by {interaction.user.id} for {member.id}")
+            await database.finish_ticket_approval(ticket["channel_id"], ticket.get("submitted_email") or "", tenure)
         except Exception as exc:
-            await database.release_ticket_review(ticket_channel_id)
+            await database.release_ticket_review(ticket["channel_id"])
             if invite:
                 try:
-                    await invite.delete(reason="Approval workflow did not complete")
+                    await invite.delete(reason="Purchase approval did not complete")
                 except discord.HTTPException:
                     pass
-            await interaction.followup.send(
-                f"Approval could not finish. The ticket remains pending; retry after fixing the issue. Details: {type(exc).__name__}",
-                ephemeral=True
-            )
+            await interaction.followup.send(f"Approval could not finish. The purchase remains pending. Details: {type(exc).__name__}", ephemeral=True)
             raise
-
-        # The purchase is now approved. Delivery/logging failures must not roll back approval
-        # or invalidate the only invite that can get the customer into Server B.
-        delivery = (
-            "Your membership payment was approved. "
-            f"Your one-use Server B invite (expires in 24 hours): {invite.url}"
-        )
+        delivery = f"Your purchase has been verified and your {days}-day membership is approved. Join Server B with this one-use invite (expires in 24 hours): {invite.url}"
         delivered = False
         try:
             await member.send(delivery)
             delivered = True
         except discord.HTTPException:
-            ticket_channel = guild.get_channel(ticket_channel_id)
+            ticket_channel = interaction.guild.get_channel(ticket["channel_id"])
             if isinstance(ticket_channel, discord.TextChannel):
                 try:
                     await ticket_channel.send(f"{member.mention} {delivery}")
@@ -274,43 +226,19 @@ class EvidenceReviewView(discord.ui.View):
                 except discord.HTTPException:
                     pass
         try:
-            await interaction.message.edit(
-                content=f"Payment approved by {interaction.user.mention}. "
-                        + ("Invite delivered." if delivered else "Invite delivery needs staff follow-up."),
-                view=None
-            )
-        except discord.HTTPException:
+            embed = discord.Embed.from_dict(interaction.message.embeds[0].to_dict()) if interaction.message.embeds else discord.Embed()
+            embed.title = "Mentorship role assigned — purchase verified"
+            embed.add_field(name="Approved duration", value=tenure, inline=True)
+            embed.add_field(name="Purchase verified by", value=interaction.user.mention, inline=True)
+            embed.color = discord.Color.green()
+            await interaction.message.edit(embed=embed, content="Purchase verified. " + ("One-use invite delivered." if delivered else "Invite delivery needs staff follow-up."), view=LogActionsView(member.id, interaction.guild.id))
+        except (discord.HTTPException, IndexError):
             pass
-        embed = discord.Embed(title="Sale approved", color=discord.Color.green())
-        embed.add_field(name="Discord user", value=f"{member} ({member.id})", inline=False)
-        embed.add_field(name="Email", value=ticket.get("submitted_email") or "Not supplied", inline=True)
-        embed.add_field(name="Tenure", value=ticket["tenure"].title(), inline=True)
-        # A new role assignment is logged by the role-update listener to both configured
-        # role-assigned and sales channels. If the role already existed, write the sale log here.
-        if role_was_already_present:
-            channel = guild.get_channel(cfg.get("sales_channel_id")) if cfg.get("sales_channel_id") else None
-            if isinstance(channel, discord.TextChannel):
-                try:
-                    await channel.send(embed=embed, view=LogActionsView(member.id, guild.id))
-                except discord.HTTPException:
-                    pass
         if delivered:
-            await interaction.followup.send("Payment approved and one-use invite issued.", ephemeral=True)
+            await interaction.followup.send(f"Purchase verified for {days} days. One-use Server B invite sent.", ephemeral=True)
         else:
-            await interaction.followup.send(
-                f"Payment approved, but automatic delivery failed. Send this one-use invite to the member: {invite.url}",
-                ephemeral=True
-            )
+            await interaction.followup.send(f"Purchase verified for {days} days, but delivery failed. Send this one-use invite: {invite.url}", ephemeral=True)
 
-    @discord.ui.button(label="Approve Purchase", style=discord.ButtonStyle.success,
-                       custom_id="reveals:evidence_approve")
-    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._review(interaction, True)
-
-    @discord.ui.button(label="Reject Purchase", style=discord.ButtonStyle.danger,
-                       custom_id="reveals:evidence_reject")
-    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._review(interaction, False)
 
 class MembershipCheckButton(discord.ui.DynamicItem[discord.ui.Button],
                             template=r"reveals:membership:(?P<user_id>[0-9]{1,20})"):
@@ -414,30 +342,26 @@ class SendInviteButton(discord.ui.DynamicItem[discord.ui.Button],
             )
 
 
-class LogEvidenceReviewButton(discord.ui.DynamicItem[discord.ui.Button],
-                               template=r"reveals:log_review:(?P<decision>approve|reject):(?P<ticket_id>[0-9]{1,20})"):
-    def __init__(self, ticket_id: int, approve: bool):
-        self.ticket_id = ticket_id
-        self.approve_payment = approve
-        label = "Approve payment" if approve else "Reject payment"
-        style = discord.ButtonStyle.success if approve else discord.ButtonStyle.danger
-        decision = "approve" if approve else "reject"
-        super().__init__(discord.ui.Button(label=label, style=style,
-            custom_id=f"reveals:log_review:{decision}:{ticket_id}"))
+class MembershipApprovalButton(discord.ui.DynamicItem[discord.ui.Button],
+                                   template=r"reveals:approve_membership:(?P<user_id>[0-9]{1,20}):(?P<days>30|90)"):
+    def __init__(self, user_id: int, days: int):
+        self.user_id = user_id
+        self.days = days
+        super().__init__(discord.ui.Button(label=f"Verify & approve — {days} days", style=discord.ButtonStyle.success, custom_id=f"reveals:approve_membership:{user_id}:{days}"))
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["ticket_id"]), match["decision"] == "approve")
+        return cls(int(match["user_id"]), int(match["days"]))
 
     async def callback(self, interaction: discord.Interaction):
-        await EvidenceReviewView(ticket_channel_id=self.ticket_id)._review(interaction, self.approve_payment)
+        await EvidenceReviewView().approve_from_role_log(interaction, self.user_id, self.days)
 
 
-class LogEvidenceReviewView(discord.ui.View):
-    def __init__(self, ticket_id: int):
+class MembershipApprovalView(discord.ui.View):
+    def __init__(self, user_id: int):
         super().__init__(timeout=None)
-        self.add_item(LogEvidenceReviewButton(ticket_id, True))
-        self.add_item(LogEvidenceReviewButton(ticket_id, False))
+        self.add_item(MembershipApprovalButton(user_id, 30))
+        self.add_item(MembershipApprovalButton(user_id, 90))
 
 
 class LogActionsView(discord.ui.View):
@@ -451,8 +375,7 @@ class Ticketing(commands.Cog):
         self.bot = bot
         bot.add_view(PurchasePanel())
         bot.add_view(PurchaseTierView())
-        bot.add_view(EvidenceReviewView())
-        bot.add_dynamic_items(MembershipCheckButton, SendInviteButton, LogEvidenceReviewButton)
+        bot.add_dynamic_items(MembershipCheckButton, SendInviteButton, MembershipApprovalButton)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -461,38 +384,22 @@ class Ticketing(commands.Cog):
         ticket = await database.get_ticket(message.channel.id)
         if not ticket or ticket["approval_status"] != "pending" or ticket["ticket_type"] not in ("purchase", "renewal"):
             return
-        images = [
-            attachment for attachment in message.attachments
-            if (attachment.content_type or "").startswith("image/")
-            or attachment.filename.lower().endswith(IMAGE_EXTENSIONS)
-        ]
+        images = [att for att in message.attachments if (att.content_type or "").startswith("image/") or att.filename.lower().endswith(IMAGE_EXTENSIONS)]
         if not images:
             return
         await database.set_evidence(message.channel.id, message.id)
         cfg = await database.get_config(message.guild.id)
-        embed = discord.Embed(
-            title="Payment screenshot submitted",
-            description=(f"User: {message.author} ({message.author.id})\n"
-                         f"Email: {ticket.get('submitted_email') or 'Not supplied'}\n"
-                         f"Access: {(ticket.get('tenure') or 'Not selected').title()}"),
-            color=discord.Color.gold()
-        )
-        embed.add_field(name="Evidence", value=f"[Open screenshot]({images[0].url})", inline=False)
-        embed.set_image(url=images[0].url)
         staff_role = message.guild.get_role(cfg.get("staff_role_id")) if cfg and cfg.get("staff_role_id") else None
         await message.channel.send(
-            content=staff_role.mention if staff_role else None,
-            embed=embed, view=EvidenceReviewView(),
+            (f"{staff_role.mention} " if staff_role else "") +
+            "Payment screenshot received. Staff will verify the purchase from the sales channel. "
+            "The access duration (30 or 90 days) is selected in the role-assigned log after verification.",
             allowed_mentions=discord.AllowedMentions(roles=True, everyone=False)
         )
         sales_log = message.guild.get_channel(cfg.get("sales_channel_id")) if cfg and cfg.get("sales_channel_id") else None
         if isinstance(sales_log, discord.TextChannel):
             try:
-                await sales_log.send(
-                    content=f"Payment approval requested for member ID {ticket['user_id']}. Ticket channel ID: {message.channel.id}",
-                    embed=embed, view=LogEvidenceReviewView(message.channel.id),
-                    allowed_mentions=discord.AllowedMentions.none()
-                )
+                await sales_log.send(file=await images[0].to_file())
             except discord.HTTPException:
                 pass
 
