@@ -67,8 +67,6 @@ async def create_private_ticket(guild: discord.Guild, member: discord.Member,
     if cfg_url:
         embed.add_field(name="Checkout", value="Use the Monthly or Quarterly button below.", inline=False)
     await channel.send(embed=embed, view=PurchaseTierView())
-    await channel.send("Upload your payment screenshot here when checkout is complete.",
-                       view=CloseTicketView())
     return channel
 
 class PurchaseEmailModal(discord.ui.Modal, title="Purchase Mentorship"):
@@ -151,6 +149,20 @@ class PurchaseTierView(discord.ui.View):
                        custom_id="reveals:tier_quarterly")
     async def quarterly(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._send_tier(interaction, "quarterly")
+
+    @discord.ui.button(label="Close ticket", style=discord.ButtonStyle.danger,
+                       custom_id="reveals:ticket_close")
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ticket = await database.get_ticket(interaction.channel_id)
+        if not ticket or ticket["guild_id"] != interaction.guild_id:
+            return await interaction.response.send_message("Not a registered ticket.", ephemeral=True)
+        is_owner = ticket["user_id"] == interaction.user.id
+        can_manage = interaction.user.guild_permissions.manage_channels or interaction.user.guild_permissions.administrator
+        if not is_owner and not can_manage:
+            return await interaction.response.send_message("Only the ticket owner or staff can close this ticket.", ephemeral=True)
+        await database.close_ticket(interaction.channel_id)
+        await interaction.response.send_message("Ticket closed. This channel will now be deleted.", ephemeral=True)
+        await interaction.channel.delete(reason=f"Ticket closed by {interaction.user.id}")
 
 class CloseTicketView(discord.ui.View):
     def __init__(self):
@@ -378,7 +390,6 @@ class Ticketing(commands.Cog):
         bot.add_view(PurchasePanel())
         bot.add_view(PurchaseTierView())
         bot.add_view(EvidenceReviewView())
-        bot.add_view(CloseTicketView())
         bot.add_dynamic_items(MembershipCheckButton, ConfigStatusButton)
 
     @commands.Cog.listener()
