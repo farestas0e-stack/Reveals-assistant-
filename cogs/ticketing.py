@@ -195,7 +195,7 @@ class EvidenceReviewView(discord.ui.View):
                 f"Payment evidence rejected by {interaction.user.mention}. Please contact staff."
             )
             return
-        if ticket.get("tenure") not in ("monthly", "quarterly"):
+        if ticket.get("tenure") != "monthly":
             return await interaction.response.send_message(
                 "The member must select Monthly or Quarterly before approval.", ephemeral=True
             )
@@ -266,11 +266,13 @@ class EvidenceReviewView(discord.ui.View):
             await member.send(delivery)
             delivered = True
         except discord.HTTPException:
-            try:
-                await interaction.channel.send(f"{member.mention} {delivery}")
-                delivered = True
-            except discord.HTTPException:
-                pass
+            ticket_channel = guild.get_channel(ticket_channel_id)
+            if isinstance(ticket_channel, discord.TextChannel):
+                try:
+                    await ticket_channel.send(f"{member.mention} {delivery}")
+                    delivered = True
+                except discord.HTTPException:
+                    pass
         try:
             await interaction.message.edit(
                 content=f"Payment approved by {interaction.user.mention}. "
