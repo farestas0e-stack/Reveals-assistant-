@@ -72,6 +72,8 @@ class Config(commands.Cog):
             return await interaction.response.send_message("Ticket category IDs must identify categories in Server A.", ephemeral=True)
         if staff_id and guild.get_role(staff_id) is None:
             return await interaction.response.send_message("Staff role ID is invalid.", ephemeral=True)
+        if guild.me is None:
+            return await interaction.response.send_message("Bot member cache is unavailable; retry in a moment.", ephemeral=True)
         if role >= guild.me.top_role:
             return await interaction.response.send_message(
                 "Move the bot's highest role above the mentorship role before setup.", ephemeral=True
