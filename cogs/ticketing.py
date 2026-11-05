@@ -197,7 +197,7 @@ class EvidenceReviewView(discord.ui.View):
             return
         if ticket.get("tenure") != "monthly":
             return await interaction.response.send_message(
-                "The member must select Monthly or Quarterly before approval.", ephemeral=True
+                "The member must request the membership checkout link before approval.", ephemeral=True
             )
         cfg = await database.get_config(ticket["guild_id"])
         guild = interaction.guild
@@ -258,7 +258,7 @@ class EvidenceReviewView(discord.ui.View):
         # The purchase is now approved. Delivery/logging failures must not roll back approval
         # or invalidate the only invite that can get the customer into Server B.
         delivery = (
-            f"Your {ticket['tenure']} payment was approved. "
+            "Your membership payment was approved. "
             f"Your one-use Server B invite (expires in 24 hours): {invite.url}"
         )
         delivered = False
@@ -474,7 +474,7 @@ class Ticketing(commands.Cog):
             title="Payment screenshot submitted",
             description=(f"User: {message.author} ({message.author.id})\n"
                          f"Email: {ticket.get('submitted_email') or 'Not supplied'}\n"
-                         f"Plan: {(ticket.get('tenure') or 'Not selected').title()}"),
+                         f"Access: {(ticket.get('tenure') or 'Not selected').title()}"),
             color=discord.Color.gold()
         )
         embed.add_field(name="Evidence", value=f"[Open screenshot]({images[0].url})", inline=False)
