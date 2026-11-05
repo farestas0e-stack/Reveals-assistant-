@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS subscriptions (
  tenure TEXT NOT NULL DEFAULT 'monthly', email TEXT,
  PRIMARY KEY(user_id, guild_a_id)
 );
+CREATE TABLE IF NOT EXISTS provider_webhook_events (
+ provider TEXT NOT NULL, event_id TEXT NOT NULL, event_type TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'processing', received_at TEXT NOT NULL DEFAULT (datetime('now')),
+ PRIMARY KEY(provider, event_id)
+);
 CREATE TABLE IF NOT EXISTS tickets (
  channel_id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
  ticket_type TEXT NOT NULL, submitted_email TEXT, verified_email TEXT,
@@ -232,4 +237,33 @@ async def close_ticket(channel_id: int) -> None:
             "UPDATE tickets SET closed_at=datetime('now') WHERE channel_id=?",
             (channel_id,)
         )
+        await db.commit()
+
+
+async def claim_provider_event(provider: str, event_id: str, event_type: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            INSERT OR IGNORE INTO provider_webhook_events
+                (provider, event_id, event_type, status)
+            VALUES(?,?,?,'processing')
+        """, (provider, event_id, event_type))
+        await db.commit()
+        return cursor.rowcount == 1
+
+
+async def finish_provider_event(provider: str, event_id: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            UPDATE provider_webhook_events SET status='processed'
+            WHERE provider=? AND event_id=?
+        """, (provider, event_id))
+        await db.commit()
+
+
+async def release_provider_event(provider: str, event_id: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            DELETE FROM provider_webhook_events
+            WHERE provider=? AND event_id=? AND status='processing'
+        """, (provider, event_id))
         await db.commit()
