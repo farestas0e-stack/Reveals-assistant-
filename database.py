@@ -83,8 +83,8 @@ async def set_config(guild_id: int, **values: Any) -> None:
 
 async def save_subscription(user_id: int, guild_a_id: int, days: int,
                             tenure: str = "monthly", email: str | None = None) -> None:
-    if days not in (30, 90) or tenure not in ("monthly", "quarterly"):
-        raise ValueError("Unsupported subscription term.")
+    if days != 30 or tenure != "monthly":
+        raise ValueError("Only the single 30-day membership term is supported.")
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             INSERT INTO subscriptions
@@ -165,8 +165,8 @@ async def set_ticket_email(channel_id: int, email: str) -> None:
         await db.commit()
 
 async def set_ticket_tenure(channel_id: int, tenure: str) -> None:
-    if tenure not in ("monthly", "quarterly"):
-        raise ValueError("Invalid tenure.")
+    if tenure != "monthly":
+        raise ValueError("Only the single membership term is supported.")
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE tickets SET tenure=? WHERE channel_id=?", (tenure, channel_id))
         await db.commit()
