@@ -11,6 +11,7 @@ class Mentorship(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._offboarding: set[tuple[int, int]] = set()
+        self._superprofile_assignments: dict[tuple[int, int], dict] = {}
 
     async def _find_role_assigner(self, guild: discord.Guild, member_id: int, role_id: int):
         # Discord audit-log entries can arrive just after the member update event.
@@ -36,7 +37,8 @@ class Mentorship(commands.Cog):
                              member_label: str, user_id: int,
                              sub: dict | None, role: discord.Role,
                              assigned_by: discord.abc.User | None = None,
-                             revoked: bool = False):
+                             revoked: bool = False,
+                             assigned_by_label: str | None = None):
         email = (sub or {}).get("email") or "Not recorded"
         embed = discord.Embed(
             title="Mentorship role revoked" if revoked else "Mentorship role assigned",
@@ -46,7 +48,7 @@ class Mentorship(commands.Cog):
         embed.add_field(name="Role", value=role.mention, inline=True)
         if not revoked:
             embed.add_field(name="Assigned by",
-                            value=assigned_by.mention if assigned_by else "Unknown (Discord audit log unavailable)",
+                            value=assigned_by_label or (assigned_by.mention if assigned_by else "Unknown (Discord audit log unavailable)"),
                             inline=True)
         embed.add_field(name="Email", value=email, inline=True)
         embed.add_field(name="Access duration", value="Role-based access — no expiry tracking", inline=False)
@@ -179,10 +181,20 @@ class Mentorship(commands.Cog):
             return
         sub = await database.get_subscription(after.id, after.guild.id)
         if role in after.roles:
-            # The configured provider role is the payment-verification signal.
-            actor = await self._find_role_assigner(after.guild, after.id, role.id)
+            # A SuperProfile webhook marker identifies provider-driven role assignments.
+            context = self._superprofile_assignments.pop((after.guild.id, after.id), None)
+            if context:
+                sub = {**(sub or {}), "email": context.get("email") or (sub or {}).get("email")}
+                actor = None
+                actor_label = "SuperProfile — successful purchase"
+            else:
+                actor = await self._find_role_assigner(after.guild, after.id, role.id)
+                actor_label = None
             await self._grant_community_access(after, cfg, sub)
-            await self._send_role_log(after.guild, cfg, str(after), after.id, sub, role, assigned_by=actor)
+            await self._send_role_log(
+                after.guild, cfg, str(after), after.id, sub, role,
+                assigned_by=actor, assigned_by_label=actor_label
+            )
         else:
             await self._offboard(
                 after.guild, after.id, cfg,
