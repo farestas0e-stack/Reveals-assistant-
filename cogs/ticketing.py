@@ -63,9 +63,9 @@ async def create_private_ticket(guild: discord.Guild, member: discord.Member,
     embed.add_field(name="Discord user", value=f"{member} ({member.id})", inline=False)
     if submitted_email:
         embed.add_field(name="Payment email", value=submitted_email, inline=False)
-    cfg_url = cfg.get("monthly_url")
+    cfg_url = cfg.get("renewal_url") or cfg.get("monthly_url")
     if cfg_url:
-        embed.add_field(name="Checkout", value="Use the Monthly or Quarterly button below.", inline=False)
+        embed.add_field(name="Checkout", value="Use the Get membership link button below.", inline=False)
     await channel.send(embed=embed, view=PurchaseTierView())
     return channel
 
@@ -119,36 +119,20 @@ class PurchaseTierView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    async def _send_tier(self, interaction: discord.Interaction, tenure: str):
+    @discord.ui.button(label="Get membership link", style=discord.ButtonStyle.success,
+                       custom_id="reveals:membership_checkout")
+    async def checkout(self, interaction: discord.Interaction, button: discord.ui.Button):
         ticket = await database.get_ticket(interaction.channel_id)
         if not ticket or ticket["user_id"] != interaction.user.id:
-            return await interaction.response.send_message(
-                "Only the ticket owner can select a plan.", ephemeral=True
-            )
+            return await interaction.response.send_message("Only the ticket owner can request the checkout link.", ephemeral=True)
         if ticket["approval_status"] != "pending":
-            return await interaction.response.send_message(
-                "This ticket is no longer pending.", ephemeral=True
-            )
+            return await interaction.response.send_message("This ticket is no longer pending.", ephemeral=True)
         cfg = await database.get_config(ticket["guild_id"])
-        url = cfg.get("monthly_url" if tenure == "monthly" else "quarterly_url") if cfg else None
+        url = (cfg.get("renewal_url") or cfg.get("monthly_url")) if cfg else None
         if not url or not url.startswith(("https://", "http://")):
-            return await interaction.response.send_message(
-                "This checkout link is not configured. Contact staff.", ephemeral=True
-            )
-        await database.set_ticket_tenure(interaction.channel_id, tenure)
-        await interaction.response.send_message(
-            f"{tenure.title()} checkout link: {url}", ephemeral=True
-        )
-
-    @discord.ui.button(label="Monthly", style=discord.ButtonStyle.success,
-                       custom_id="reveals:tier_monthly")
-    async def monthly(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._send_tier(interaction, "monthly")
-
-    @discord.ui.button(label="Quarterly", style=discord.ButtonStyle.primary,
-                       custom_id="reveals:tier_quarterly")
-    async def quarterly(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._send_tier(interaction, "quarterly")
+            return await interaction.response.send_message("The membership checkout link is not configured. Contact staff.", ephemeral=True)
+        await database.set_ticket_tenure(interaction.channel_id, "monthly")
+        await interaction.response.send_message(f"Membership checkout link: {url}", ephemeral=True)
 
     @discord.ui.button(label="Close ticket", style=discord.ButtonStyle.danger,
                        custom_id="reveals:ticket_close")
@@ -183,16 +167,18 @@ class CloseTicketView(discord.ui.View):
         await interaction.channel.delete(reason=f"Ticket closed by {interaction.user.id}")
 
 class EvidenceReviewView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, ticket_channel_id: int | None = None):
         super().__init__(timeout=None)
+        self.ticket_channel_id = ticket_channel_id
 
     async def _review(self, interaction: discord.Interaction, approve: bool):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message(
                 "Only Administrators can review payment evidence.", ephemeral=True
             )
-        ticket = await database.get_ticket(interaction.channel_id)
-        if not ticket or not ticket.get("evidence_message_id"):
+        ticket_channel_id = self.ticket_channel_id or interaction.channel_id
+        ticket = await database.get_ticket(ticket_channel_id)
+        if not ticket or ticket["guild_id"] != interaction.guild_id or not ticket.get("evidence_message_id"):
             return await interaction.response.send_message(
                 "No payment evidence is registered in this ticket.", ephemeral=True
             )
@@ -201,7 +187,7 @@ class EvidenceReviewView(discord.ui.View):
                 "This evidence is already being processed or has been reviewed.", ephemeral=True
             )
         if not approve:
-            changed = await database.reject_ticket(interaction.channel_id)
+            changed = await database.reject_ticket(ticket_channel_id)
             if not changed:
                 return await interaction.response.send_message("This ticket was already reviewed.", ephemeral=True)
             await interaction.response.edit_message(content="Payment evidence rejected by Administrator.", view=None)
@@ -236,12 +222,12 @@ class EvidenceReviewView(discord.ui.View):
             return await interaction.response.send_message(
                 "The bot needs Create Invite permission in a Server B text channel.", ephemeral=True
             )
-        if not await database.claim_ticket_review(interaction.channel_id):
+        if not await database.claim_ticket_review(ticket_channel_id):
             return await interaction.response.send_message("This ticket is already being reviewed.", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
         invite = None
         try:
-            days = 30 if ticket["tenure"] == "monthly" else 90
+            days = 30
             # Store the membership record before adding the role so event logs have email/tenure.
             role_was_already_present = role in member.roles
             await database.save_subscription(
@@ -254,10 +240,10 @@ class EvidenceReviewView(discord.ui.View):
                 reason=f"Approved membership for Discord user {member.id}"
             )
             await database.finish_ticket_approval(
-                interaction.channel_id, ticket.get("submitted_email") or "", ticket["tenure"]
+                ticket_channel_id, ticket.get("submitted_email") or "", ticket["tenure"]
             )
         except Exception as exc:
-            await database.release_ticket_review(interaction.channel_id)
+            await database.release_ticket_review(ticket_channel_id)
             if invite:
                 try:
                     await invite.delete(reason="Approval workflow did not complete")
@@ -426,40 +412,37 @@ class SendInviteButton(discord.ui.DynamicItem[discord.ui.Button],
             )
 
 
-class ConfigStatusButton(discord.ui.DynamicItem[discord.ui.Button],
-                            template=r"reveals:config:(?P<guild_id>[0-9]{1,20})"):
-    def __init__(self, guild_id: int):
-        self.guild_id = guild_id
-        super().__init__(discord.ui.Button(
-            label="Configuration status", style=discord.ButtonStyle.primary,
-            custom_id=f"reveals:config:{guild_id}"
-        ))
+class LogEvidenceReviewButton(discord.ui.DynamicItem[discord.ui.Button],
+                               template=r"reveals:log_review:(?P<decision>approve|reject):(?P<ticket_id>[0-9]{1,20})"):
+    def __init__(self, ticket_id: int, approve: bool):
+        self.ticket_id = ticket_id
+        self.approve_payment = approve
+        label = "Approve payment" if approve else "Reject payment"
+        style = discord.ButtonStyle.success if approve else discord.ButtonStyle.danger
+        decision = "approve" if approve else "reject"
+        super().__init__(discord.ui.Button(label=label, style=style,
+            custom_id=f"reveals:log_review:{decision}:{ticket_id}"))
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["guild_id"]))
+        return cls(int(match["ticket_id"]), match["decision"] == "approve")
 
     async def callback(self, interaction: discord.Interaction):
-        if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("Administrator permission required.", ephemeral=True)
-        cfg = await database.get_config(self.guild_id)
-        if not cfg:
-            return await interaction.response.send_message("No setup configuration found.", ephemeral=True)
-        required = ("server_b_id", "mentorship_role_id", "sales_channel_id",
-                    "role_assigned_channel_id", "role_revoked_channel_id",
-                    "ticket_category_id", "renewal_category_id", "monthly_url", "quarterly_url")
-        missing = [key for key in required if not cfg.get(key)]
-        await interaction.response.send_message(
-            "Configuration: " + ("Complete" if not missing else "Missing " + ", ".join(missing)),
-            ephemeral=True
-        )
+        await EvidenceReviewView(ticket_channel_id=self.ticket_id)._review(interaction, self.approve_payment)
+
+
+class LogEvidenceReviewView(discord.ui.View):
+    def __init__(self, ticket_id: int):
+        super().__init__(timeout=None)
+        self.add_item(LogEvidenceReviewButton(ticket_id, True))
+        self.add_item(LogEvidenceReviewButton(ticket_id, False))
+
 
 class LogActionsView(discord.ui.View):
     def __init__(self, user_id: int, guild_id: int):
         super().__init__(timeout=None)
         self.add_item(MembershipCheckButton(user_id))
         self.add_item(SendInviteButton(user_id))
-        self.add_item(ConfigStatusButton(guild_id))
 
 class Ticketing(commands.Cog):
     def __init__(self, bot):
@@ -467,7 +450,7 @@ class Ticketing(commands.Cog):
         bot.add_view(PurchasePanel())
         bot.add_view(PurchaseTierView())
         bot.add_view(EvidenceReviewView())
-        bot.add_dynamic_items(MembershipCheckButton, SendInviteButton, ConfigStatusButton)
+        bot.add_dynamic_items(MembershipCheckButton, SendInviteButton, LogEvidenceReviewButton)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -500,6 +483,16 @@ class Ticketing(commands.Cog):
             embed=embed, view=EvidenceReviewView(),
             allowed_mentions=discord.AllowedMentions(roles=True, everyone=False)
         )
+        sales_log = message.guild.get_channel(cfg.get("sales_channel_id")) if cfg and cfg.get("sales_channel_id") else None
+        if isinstance(sales_log, discord.TextChannel):
+            try:
+                await sales_log.send(
+                    content=f"Payment approval requested for member ID {ticket['user_id']}. Ticket channel ID: {message.channel.id}",
+                    embed=embed, view=LogEvidenceReviewView(message.channel.id),
+                    allowed_mentions=discord.AllowedMentions.none()
+                )
+            except discord.HTTPException:
+                pass
 
     @app_commands.command(name="mentorship_panel", description="Post the purchase panel.")
     @app_commands.checks.has_permissions(administrator=True)
