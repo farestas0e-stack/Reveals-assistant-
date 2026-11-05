@@ -3,54 +3,65 @@ from discord import app_commands
 from discord.ext import commands
 import database
 
+def valid_url(value: str) -> bool:
+    return value.startswith(("https://", "http://"))
+
 class Config(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="setup", description="Configure Server A, B and C.")
+    @app_commands.command(name="setup", description="Configure Servers A/B/C and membership checkout.")
     @app_commands.checks.has_permissions(administrator=True)
-    @app_commands.describe(
-        server_b_id="Server B ID (enable Developer Mode to copy it)",
-        server_c_id="Optional Server C ID",
-        log_channel_id="Optional text channel ID in Server C")
-    async def setup(self, interaction: discord.Interaction,
-        server_b_id: str, mentorship_role: discord.Role,
-        sales_channel: discord.TextChannel,
-        role_assigned_channel: discord.TextChannel, role_revoked_channel: discord.TextChannel,
-        ticket_category: discord.CategoryChannel, renewal_category: discord.CategoryChannel,
-        renewal_url: str, subscription_days: app_commands.Range[int, 1, 365] = 30,
+    @app_commands.describe(server_b_id="Server B numeric ID", mentorship_role_id="Mentorship role ID",
+        sales_channel_id="Sales log channel ID", role_assigned_channel_id="Role assigned log channel ID",
+        role_revoked_channel_id="Role revoked log channel ID", ticket_category_id="Ticket category ID",
+        renewal_category_id="Renewal category ID", monthly_url="Monthly checkout URL",
+        quarterly_url="Quarterly checkout URL", staff_role_id="Optional staff role ID",
+        server_c_id="Optional Server C ID", log_channel_id="Optional Server C log channel ID")
+    async def setup(self, interaction: discord.Interaction, server_b_id: str,
+        mentorship_role_id: str, sales_channel_id: str, role_assigned_channel_id: str,
+        role_revoked_channel_id: str, ticket_category_id: str, renewal_category_id: str,
+        monthly_url: str, quarterly_url: str, staff_role_id: str | None = None,
         server_c_id: str | None = None, log_channel_id: str | None = None):
-        server_a = interaction.guild
-        if server_a is None:
-            return await interaction.response.send_message("Run this command inside Server A.", ephemeral=True)
+        guild = interaction.guild
+        if guild is None:
+            return await interaction.response.send_message("Run this in Server A.", ephemeral=True)
         try:
-            b_id = int(server_b_id)
+            ids = [int(x) for x in (server_b_id, mentorship_role_id, sales_channel_id,
+                role_assigned_channel_id, role_revoked_channel_id, ticket_category_id, renewal_category_id)]
+            b_id, role_id, sales_id, assigned_id, revoked_id, ticket_cat_id, renewal_cat_id = ids
+            staff_id = int(staff_role_id) if staff_role_id else None
             c_id = int(server_c_id) if server_c_id else None
             log_id = int(log_channel_id) if log_channel_id else None
         except ValueError:
-            return await interaction.response.send_message("Server and channel IDs must be numeric Discord IDs.", ephemeral=True)
-        if any(x.guild.id != server_a.id for x in
-               (mentorship_role, sales_channel, role_assigned_channel, role_revoked_channel, ticket_category, renewal_category)):
-            return await interaction.response.send_message("All selected roles and channels must belong to Server A.", ephemeral=True)
-        server_b = self.bot.get_guild(b_id)
-        if server_b is None:
-            return await interaction.response.send_message("The bot must be invited to Server B before setup.", ephemeral=True)
-        if c_id is not None:
-            server_c = self.bot.get_guild(c_id)
-            log_channel = server_c.get_channel(log_id) if server_c and log_id else None
-            if not isinstance(log_channel, discord.TextChannel):
-                return await interaction.response.send_message("For Server C, provide a valid text channel ID in that server.", ephemeral=True)
-        elif log_id is not None:
-            return await interaction.response.send_message("Provide Server C ID when configuring its log channel.", ephemeral=True)
-        await database.set_config(server_a.id, server_a_id=server_a.id,
-            server_b_id=b_id, server_c_id=c_id, mentorship_role_id=mentorship_role.id,
-            sales_channel_id=sales_channel.id,
-            role_assigned_channel_id=role_assigned_channel.id,
-            role_revoked_channel_id=role_revoked_channel.id,
-            ticket_category_id=ticket_category.id, renewal_category_id=renewal_category.id,
-            log_channel_id=log_id, renewal_url=renewal_url,
-            subscription_days=subscription_days)
-        await interaction.response.send_message("Configuration saved.", ephemeral=True)
+            return await interaction.response.send_message("Every supplied ID must be numeric.", ephemeral=True)
+        if not valid_url(monthly_url) or not valid_url(quarterly_url):
+            return await interaction.response.send_message("Monthly and Quarterly URLs must start with http:// or https://.", ephemeral=True)
+        role = guild.get_role(role_id)
+        sales = guild.get_channel(sales_id)
+        assigned = guild.get_channel(assigned_id)
+        revoked = guild.get_channel(revoked_id)
+        ticket_cat = guild.get_channel(ticket_cat_id)
+        renewal_cat = guild.get_channel(renewal_cat_id)
+        if not isinstance(role, discord.Role) or not all(isinstance(x, discord.TextChannel) for x in (sales,assigned,revoked)):
+            return await interaction.response.send_message("One or more role/channel IDs are invalid for Server A.", ephemeral=True)
+        if not isinstance(ticket_cat, discord.CategoryChannel) or not isinstance(renewal_cat, discord.CategoryChannel):
+            return await interaction.response.send_message("Ticket and renewal category IDs must identify categories in Server A.", ephemeral=True)
+        if staff_id and guild.get_role(staff_id) is None:
+            return await interaction.response.send_message("Staff role ID is invalid.", ephemeral=True)
+        if self.bot.get_guild(b_id) is None:
+            return await interaction.response.send_message("Invite the bot to Server B first.", ephemeral=True)
+        if c_id and (self.bot.get_guild(c_id) is None or not isinstance(self.bot.get_guild(c_id).get_channel(log_id), discord.TextChannel)):
+            return await interaction.response.send_message("Server C or its log channel ID is invalid.", ephemeral=True)
+        if not c_id and log_id:
+            return await interaction.response.send_message("Provide Server C ID when setting a log channel.", ephemeral=True)
+        await database.set_config(guild.id, server_a_id=guild.id, server_b_id=b_id,
+            server_c_id=c_id, mentorship_role_id=role_id, sales_channel_id=sales_id,
+            role_assigned_channel_id=assigned_id, role_revoked_channel_id=revoked_id,
+            ticket_category_id=ticket_cat_id, renewal_category_id=renewal_cat_id,
+            monthly_url=monthly_url, quarterly_url=quarterly_url, staff_role_id=staff_id,
+            log_channel_id=log_id)
+        await interaction.response.send_message("Configuration saved. Monthly and Quarterly checkout links are active.", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Config(bot))
