@@ -267,3 +267,15 @@ async def release_provider_event(provider: str, event_id: str) -> None:
             WHERE provider=? AND event_id=? AND status='processing'
         """, (provider, event_id))
         await db.commit()
+
+
+async def mark_ticket_access_granted(channel_id: int, email: str | None = None) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            UPDATE tickets
+            SET approved_at=COALESCE(approved_at, datetime('now')),
+                verified_email=COALESCE(?, verified_email),
+                approval_status='approved'
+            WHERE channel_id=?
+        """, (email, channel_id))
+        await db.commit()
