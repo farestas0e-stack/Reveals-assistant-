@@ -66,10 +66,17 @@ class Mentorship(commands.Cog):
         try:
             sub = await database.get_subscription(user_id, source.id)
             await self._kick_from_community(cfg, user_id, reason)
-            renewal_url = cfg.get("renewal_url") or cfg.get("monthly_url")
-            message = f"Your mentorship access has ended. Renew here: {renewal_url}" if renewal_url else (
-                "Your mentorship access has ended. Please contact the team to renew."
-            )
+            monthly_url = cfg.get("monthly_url") or cfg.get("renewal_url")
+            quarterly_url = cfg.get("quarterly_url")
+            if monthly_url and quarterly_url:
+                message = (
+                    "Your mentorship access has ended. Choose a renewal plan:\\n"
+                    f"Monthly: {monthly_url}\\nQuarterly: {quarterly_url}"
+                )
+            elif monthly_url:
+                message = f"Your mentorship access has ended. Renew here: {monthly_url}"
+            else:
+                message = "Your mentorship access has ended. Please contact the team to renew."
             dm_sent = False
             try:
                 user = await self.bot.fetch_user(user_id)
