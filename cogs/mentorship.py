@@ -65,7 +65,7 @@ class Mentorship(commands.Cog):
             for key in ("role_assigned_channel_id", "sales_channel_id"):
                 channel = after.guild.get_channel(cfg.get(key))
                 if isinstance(channel, discord.TextChannel):
-                    await channel.send(embed=embed)
+                    await channel.send(embed=embed, view=__import__("cogs.ticketing", fromlist=["LogActionsView"]).LogActionsView())
         else:
             await self._offboard(after.guild, after.id, cfg, "Mentorship role removed in Server A")
             channel = after.guild.get_channel(cfg.get("role_revoked_channel_id"))
@@ -74,7 +74,7 @@ class Mentorship(commands.Cog):
                 embed.add_field(name="Discord user", value=f"{after} ({after.id})", inline=False)
                 embed.add_field(name="Email", value=email, inline=True)
                 embed.add_field(name="Tenure", value=tenure, inline=True)
-                await channel.send(embed=embed)
+                await channel.send(embed=embed, view=__import__("cogs.ticketing", fromlist=["LogActionsView"]).LogActionsView())
 
     @tasks.loop(minutes=20)
     async def role_verification(self):
