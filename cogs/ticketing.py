@@ -56,8 +56,8 @@ async def create_private_ticket(guild: discord.Guild, member: discord.Member,
     embed = discord.Embed(
         title=title,
         description=(f"{member.mention}, use the button below to get the membership checkout link. Complete payment, then "
-                     "upload a clear payment receipt screenshot. An Administrator must approve it "
-                     "before Server B access is issued."),
+                     "upload your receipt if requested. Server B access is granted automatically when "
+                     "the configured membership role is assigned."),
         color=discord.Color.blurple()
     )
     embed.add_field(name="Discord user", value=f"{member} ({member.id})", inline=False)
@@ -379,25 +379,26 @@ class Ticketing(commands.Cog):
         self.bot = bot
         bot.add_view(PurchasePanel())
         bot.add_view(PurchaseTierView())
-        bot.add_dynamic_items(MembershipCheckButton, SendInviteButton, MembershipApprovalButton)
+        bot.add_dynamic_items(MembershipCheckButton, SendInviteButton)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild or not message.attachments:
             return
         ticket = await database.get_ticket(message.channel.id)
-        if not ticket or ticket["approval_status"] != "pending" or ticket["ticket_type"] not in ("purchase", "renewal"):
+        if not ticket or ticket["ticket_type"] not in ("purchase", "renewal"):
             return
         images = [att for att in message.attachments if (att.content_type or "").startswith("image/") or att.filename.lower().endswith(IMAGE_EXTENSIONS)]
         if not images:
             return
-        await database.set_evidence(message.channel.id, message.id)
+        if ticket["approval_status"] == "pending":
+            await database.set_evidence(message.channel.id, message.id)
         cfg = await database.get_config(message.guild.id)
         staff_role = message.guild.get_role(cfg.get("staff_role_id")) if cfg and cfg.get("staff_role_id") else None
         await message.channel.send(
             (f"{staff_role.mention} " if staff_role else "") +
-            "Payment screenshot received. Staff will verify the purchase from the sales channel. "
-            "The access duration (30 or 90 days) is selected in the role-assigned log after verification.",
+            "Payment screenshot received and forwarded to the sales log. "
+            "Server B access is granted automatically when the configured membership role is assigned.",
             allowed_mentions=discord.AllowedMentions(roles=True, everyone=False)
         )
         sales_log = message.guild.get_channel(cfg.get("sales_channel_id")) if cfg and cfg.get("sales_channel_id") else None
