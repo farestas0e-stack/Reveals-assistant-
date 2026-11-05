@@ -261,7 +261,7 @@ class EvidenceReviewView(discord.ui.View):
             for channel_id in (cfg.get("sales_channel_id"), cfg.get("role_assigned_channel_id")):
                 channel = guild.get_channel(channel_id) if channel_id else None
                 if isinstance(channel, discord.TextChannel):
-                    await channel.send(embed=embed, view=LogActionsView(member.id))
+                    await channel.send(embed=embed, view=LogActionsView(member.id, guild.id))
             await interaction.followup.send("Payment approved and one-use invite issued.", ephemeral=True)
         except Exception as exc:
             # Do not leave a stuck processing ticket. A created invite is short-lived and one-use.
@@ -313,10 +313,39 @@ class MembershipCheckButton(discord.ui.DynamicItem[discord.ui.Button],
             ephemeral=True
         )
 
+class ConfigStatusButton(discord.ui.DynamicItem[discord.ui.Button],
+                            template=r"reveals:config:(?P<guild_id>[0-9]{1,20})"):
+    def __init__(self, guild_id: int):
+        self.guild_id = guild_id
+        super().__init__(discord.ui.Button(
+            label="Configuration status", style=discord.ButtonStyle.primary,
+            custom_id=f"reveals:config:{guild_id}"
+        ))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["guild_id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("Administrator permission required.", ephemeral=True)
+        cfg = await database.get_config(self.guild_id)
+        if not cfg:
+            return await interaction.response.send_message("No setup configuration found.", ephemeral=True)
+        required = ("server_b_id", "mentorship_role_id", "sales_channel_id",
+                    "role_assigned_channel_id", "role_revoked_channel_id",
+                    "ticket_category_id", "renewal_category_id", "monthly_url", "quarterly_url")
+        missing = [key for key in required if not cfg.get(key)]
+        await interaction.response.send_message(
+            "Configuration: " + ("Complete" if not missing else "Missing " + ", ".join(missing)),
+            ephemeral=True
+        )
+
 class LogActionsView(discord.ui.View):
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: int, guild_id: int):
         super().__init__(timeout=None)
         self.add_item(MembershipCheckButton(user_id))
+        self.add_item(ConfigStatusButton(guild_id))
 
 class Ticketing(commands.Cog):
     def __init__(self, bot):
@@ -325,7 +354,7 @@ class Ticketing(commands.Cog):
         bot.add_view(PurchaseTierView())
         bot.add_view(EvidenceReviewView())
         bot.add_view(CloseTicketView())
-        bot.add_dynamic_items(MembershipCheckButton)
+        bot.add_dynamic_items(MembershipCheckButton, ConfigStatusButton)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
