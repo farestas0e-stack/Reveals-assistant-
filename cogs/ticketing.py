@@ -403,9 +403,23 @@ class Ticketing(commands.Cog):
         sales_log = message.guild.get_channel(cfg.get("sales_channel_id")) if cfg and cfg.get("sales_channel_id") else None
         if isinstance(sales_log, discord.TextChannel):
             try:
-                await sales_log.send(file=await images[0].to_file())
+                screenshot = images[0]
+                screenshot_file = await screenshot.to_file()
+                sales_embed = discord.Embed(
+                    title="Payment screenshot submitted",
+                    description=(
+                        f"**Submitted by:** {message.author.mention}\\n"
+                        f"**Username:** {discord.utils.escape_markdown(str(message.author))}\\n"
+                        f"**User ID:** {message.author.id}"
+                    ),
+                    color=discord.Color.blurple(),
+                    timestamp=message.created_at
+                )
+                sales_embed.set_thumbnail(url=message.author.display_avatar.url)
+                sales_embed.set_image(url=f"attachment://{screenshot.filename}")
+                await sales_log.send(embed=sales_embed, file=screenshot_file)
             except discord.HTTPException:
-                pass
+                log.exception("Could not forward payment screenshot to the sales channel")
 
     @app_commands.command(name="mentorship_panel", description="Post the purchase panel.")
     @app_commands.checks.has_permissions(administrator=True)
