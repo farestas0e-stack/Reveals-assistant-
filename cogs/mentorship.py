@@ -15,9 +15,7 @@ class Mentorship(commands.Cog):
 
     async def _kick_from_community(self, source: discord.Guild, user_id: int, reason: str):
         cfg = await database.get_config(source.id)
-        if not cfg:
-            return
-        community = self.bot.get_guild(cfg["server_b_id"])
+        community = self.bot.get_guild(cfg["server_b_id"]) if cfg else None
         if community is None:
             return
         try:
@@ -55,11 +53,15 @@ class Mentorship(commands.Cog):
         role = after.guild.get_role(cfg.get("mentorship_role_id"))
         if role is None or ((role in before.roles) == (role in after.roles)):
             return
+        subscriptions = await database.active_subscriptions(after.guild.id)
+        sub = next((s for s in subscriptions if s["user_id"] == after.id), None)
+        email = sub.get("email") if sub else "Not recorded"
+        tenure = sub.get("tenure", "Not recorded").title() if sub else "Not recorded"
         if role in after.roles:
-            # A role grant is logged, but never independently grants Server B access.
             embed = discord.Embed(title="Mentorship role assigned", color=discord.Color.green())
             embed.add_field(name="Discord user", value=f"{after} ({after.id})", inline=False)
-            embed.add_field(name="Email / tenure", value="Awaiting approved ticket evidence", inline=False)
+            embed.add_field(name="Email", value=email, inline=True)
+            embed.add_field(name="Tenure", value=tenure, inline=True)
             for key in ("role_assigned_channel_id", "sales_channel_id"):
                 channel = after.guild.get_channel(cfg.get(key))
                 if isinstance(channel, discord.TextChannel):
@@ -68,7 +70,10 @@ class Mentorship(commands.Cog):
             await self._offboard(after.guild, after.id, cfg, "Mentorship role removed in Server A")
             channel = after.guild.get_channel(cfg.get("role_revoked_channel_id"))
             if isinstance(channel, discord.TextChannel):
-                embed = discord.Embed(title="Mentorship role revoked", description=f"{after} ({after.id})", color=discord.Color.red())
+                embed = discord.Embed(title="Mentorship role revoked", color=discord.Color.red())
+                embed.add_field(name="Discord user", value=f"{after} ({after.id})", inline=False)
+                embed.add_field(name="Email", value=email, inline=True)
+                embed.add_field(name="Tenure", value=tenure, inline=True)
                 await channel.send(embed=embed)
 
     @tasks.loop(minutes=20)
@@ -80,18 +85,29 @@ class Mentorship(commands.Cog):
             role = source.get_role(cfg.get("mentorship_role_id"))
             if role is None:
                 continue
+            expired = set(await database.expired_subscriptions(source.id))
             for sub in await database.active_subscriptions(source.id):
-                member = source.get_member(sub["user_id"])
+                user_id = sub["user_id"]
+                member = source.get_member(user_id)
                 if member is None:
                     try:
-                        member = await source.fetch_member(sub["user_id"])
+                        member = await source.fetch_member(user_id)
                     except discord.NotFound:
                         member = None
                     except discord.HTTPException:
+                        log.exception("Could not fetch Server A member %s", user_id)
                         continue
-                if member is None or role not in member.roles:
-                    await self._offboard(source, sub["user_id"], cfg, "20-minute mentorship role verification failed")
-                    log.info("Offboarded %s after role verification", sub["user_id"])
+                if user_id in expired and member and role in member.roles:
+                    try:
+                        await member.remove_roles(role, reason="Mentorship subscription expired")
+                    except discord.HTTPException:
+                        log.exception("Could not remove expired role for %s", user_id)
+                        continue
+                    # The member-update listener performs kick, renewal DM and deactivation.
+                    continue
+                if member is None or role not in member.roles or user_id in expired:
+                    await self._offboard(source, user_id, cfg, "20-minute mentorship verification/expiry check")
+                    log.info("Offboarded %s after role verification", user_id)
 
     @role_verification.before_loop
     async def before_role_verification(self):
