@@ -243,28 +243,7 @@ class EvidenceReviewView(discord.ui.View):
             await database.finish_ticket_approval(
                 interaction.channel_id, ticket.get("submitted_email") or "", ticket["tenure"]
             )
-            delivery = (
-                f"Your {ticket['tenure']} payment was approved. "
-                f"Your one-use Server B invite (expires in 24 hours): {invite.url}"
-            )
-            try:
-                await member.send(delivery)
-            except discord.HTTPException:
-                await interaction.channel.send(f"{member.mention} {delivery}")
-            await interaction.message.edit(
-                content=f"Payment approved by {interaction.user.mention}. Invite issued.", view=None
-            )
-            embed = discord.Embed(title="Sale approved", color=discord.Color.green())
-            embed.add_field(name="Discord user", value=f"{member} ({member.id})", inline=False)
-            embed.add_field(name="Email", value=ticket.get("submitted_email") or "Not supplied", inline=True)
-            embed.add_field(name="Tenure", value=ticket["tenure"].title(), inline=True)
-            for channel_id in (cfg.get("sales_channel_id"), cfg.get("role_assigned_channel_id")):
-                channel = guild.get_channel(channel_id) if channel_id else None
-                if isinstance(channel, discord.TextChannel):
-                    await channel.send(embed=embed, view=LogActionsView(member.id, guild.id))
-            await interaction.followup.send("Payment approved and one-use invite issued.", ephemeral=True)
         except Exception as exc:
-            # Do not leave a stuck processing ticket. A created invite is short-lived and one-use.
             await database.release_ticket_review(interaction.channel_id)
             if invite:
                 try:
@@ -272,10 +251,53 @@ class EvidenceReviewView(discord.ui.View):
                 except discord.HTTPException:
                     pass
             await interaction.followup.send(
-                f"Approval could not finish. No approval was recorded; retry after fixing the issue. Details: {type(exc).__name__}",
+                f"Approval could not finish. The ticket remains pending; retry after fixing the issue. Details: {type(exc).__name__}",
                 ephemeral=True
             )
             raise
+
+        # The purchase is now approved. Delivery/logging failures must not roll back approval
+        # or invalidate the only invite that can get the customer into Server B.
+        delivery = (
+            f"Your {ticket['tenure']} payment was approved. "
+            f"Your one-use Server B invite (expires in 24 hours): {invite.url}"
+        )
+        delivered = False
+        try:
+            await member.send(delivery)
+            delivered = True
+        except discord.HTTPException:
+            try:
+                await interaction.channel.send(f"{member.mention} {delivery}")
+                delivered = True
+            except discord.HTTPException:
+                pass
+        try:
+            await interaction.message.edit(
+                content=f"Payment approved by {interaction.user.mention}. "
+                        + ("Invite delivered." if delivered else "Invite delivery needs staff follow-up."),
+                view=None
+            )
+        except discord.HTTPException:
+            pass
+        embed = discord.Embed(title="Sale approved", color=discord.Color.green())
+        embed.add_field(name="Discord user", value=f"{member} ({member.id})", inline=False)
+        embed.add_field(name="Email", value=ticket.get("submitted_email") or "Not supplied", inline=True)
+        embed.add_field(name="Tenure", value=ticket["tenure"].title(), inline=True)
+        for channel_id in (cfg.get("sales_channel_id"), cfg.get("role_assigned_channel_id")):
+            channel = guild.get_channel(channel_id) if channel_id else None
+            if isinstance(channel, discord.TextChannel):
+                try:
+                    await channel.send(embed=embed, view=LogActionsView(member.id, guild.id))
+                except discord.HTTPException:
+                    pass
+        if delivered:
+            await interaction.followup.send("Payment approved and one-use invite issued.", ephemeral=True)
+        else:
+            await interaction.followup.send(
+                f"Payment approved, but automatic delivery failed. Send this one-use invite to the member: {invite.url}",
+                ephemeral=True
+            )
 
     @discord.ui.button(label="Approve Purchase", style=discord.ButtonStyle.success,
                        custom_id="reveals:evidence_approve")
