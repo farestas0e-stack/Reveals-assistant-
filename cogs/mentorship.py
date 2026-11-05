@@ -1,4 +1,6 @@
 import logging
+import asyncio
+from datetime import datetime, timezone
 import discord
 from discord.ext import commands, tasks
 import database
@@ -14,27 +16,59 @@ class Mentorship(commands.Cog):
     def cog_unload(self):
         self.role_verification.cancel()
 
+    async def _find_role_assigner(self, guild: discord.Guild, member_id: int, role_id: int):
+        # Discord audit-log entries can arrive just after the member update event.
+        await asyncio.sleep(1)
+        try:
+            async for entry in guild.audit_logs(limit=12, action=discord.AuditLogAction.member_role_update):
+                target = getattr(entry.target, "id", None)
+                if target != member_id or not entry.user:
+                    continue
+                if (datetime.now(timezone.utc) - entry.created_at).total_seconds() > 90:
+                    continue
+                before_roles = {r.id for r in getattr(entry.before, "roles", [])}
+                after_roles = {r.id for r in getattr(entry.after, "roles", [])}
+                if role_id in after_roles and role_id not in before_roles:
+                    return entry.user
+        except discord.Forbidden:
+            log.warning("Missing View Audit Log permission in guild %s", guild.id)
+        except discord.HTTPException:
+            log.exception("Could not inspect role assignment audit log in guild %s", guild.id)
+        return None
+
     async def _send_role_log(self, guild: discord.Guild, cfg: dict,
                              member_label: str, user_id: int,
-                             sub: dict | None, revoked: bool = False):
-        from .ticketing import LogActionsView
+                             sub: dict | None, role: discord.Role,
+                             assigned_by: discord.abc.User | None = None,
+                             revoked: bool = False):
+        from .ticketing import LogActionsView, MembershipApprovalView
         email = (sub or {}).get("email") or "Not recorded"
-        tenure = (sub or {}).get("tenure", "Not recorded").title()
+        tenure = (sub or {}).get("tenure") or "Pending purchase verification — choose 30 or 90 days"
         embed = discord.Embed(
             title="Mentorship role revoked" if revoked else "Mentorship role assigned",
             color=discord.Color.red() if revoked else discord.Color.green()
         )
         embed.add_field(name="Discord user", value=f"{member_label} ({user_id})", inline=False)
+        embed.add_field(name="Role", value=role.mention, inline=True)
+        if not revoked:
+            embed.add_field(
+                name="Assigned by",
+                value=assigned_by.mention if assigned_by else "Unknown (Discord audit log unavailable)",
+                inline=True
+            )
         embed.add_field(name="Email", value=email, inline=True)
-        embed.add_field(name="Tenure", value=tenure, inline=True)
-        channel_ids = (cfg.get("role_revoked_channel_id"),) if revoked else (
-            cfg.get("role_assigned_channel_id"), cfg.get("sales_channel_id")
-        )
+        embed.add_field(name="Access duration", value=tenure, inline=False)
+        if revoked:
+            channel_ids = (cfg.get("role_revoked_channel_id"),)
+            view = LogActionsView(user_id, guild.id)
+        else:
+            channel_ids = (cfg.get("role_assigned_channel_id"),)
+            view = MembershipApprovalView(user_id)
         for channel_id in channel_ids:
             channel = guild.get_channel(channel_id) if channel_id else None
             if isinstance(channel, discord.TextChannel):
                 try:
-                    await channel.send(embed=embed, view=LogActionsView(user_id, guild.id))
+                    await channel.send(embed=embed, view=view)
                 except discord.HTTPException:
                     log.exception("Could not send mentorship role log to %s", channel.id)
 
@@ -97,10 +131,12 @@ class Mentorship(commands.Cog):
                             "Contact them through the verified support channel."
                         )
             await database.deactivate_subscription(user_id, source.id)
-            await self._send_role_log(
-                source, cfg, str(member) if member else f"User {user_id}",
-                user_id, sub, revoked=True
-            )
+            role = source.get_role(cfg.get("mentorship_role_id"))
+            if role:
+                await self._send_role_log(
+                    source, cfg, str(member) if member else f"User {user_id}",
+                    user_id, sub, role, revoked=True
+                )
         finally:
             self._offboarding.discard(key)
 
@@ -114,8 +150,9 @@ class Mentorship(commands.Cog):
             return
         sub = await database.get_subscription(after.id, after.guild.id)
         if role in after.roles:
-            # Role assignment alone is deliberately NOT proof of payment and never grants Server B access.
-            await self._send_role_log(after.guild, cfg, str(after), after.id, sub)
+            # The provider or an authorized staff member assigns this role; the bot only logs it.
+            actor = await self._find_role_assigner(after.guild, after.id, role.id)
+            await self._send_role_log(after.guild, cfg, str(after), after.id, sub, role, assigned_by=actor)
         else:
             await self._offboard(
                 after.guild, after.id, cfg,
