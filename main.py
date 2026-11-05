@@ -3,6 +3,7 @@ import logging
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+from superprofile_webhook import SuperProfileWebhookServer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"), override=False)
@@ -23,6 +24,10 @@ intents.guilds = True
 intents.messages = True
 
 class RevealsBot(commands.Bot):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.webhook_server = None
+
     async def setup_hook(self):
         await database.init_db()
         extensions = (
@@ -37,6 +42,13 @@ class RevealsBot(commands.Bot):
             log.info("Loaded extension %s", extension)
         await self.tree.sync()
         log.info("Global application commands synced")
+        self.webhook_server = SuperProfileWebhookServer(self)
+        await self.webhook_server.start()
+
+    async def close(self):
+        if self.webhook_server:
+            await self.webhook_server.close()
+        await super().close()
 
 bot = RevealsBot(command_prefix="!", intents=intents)
 
