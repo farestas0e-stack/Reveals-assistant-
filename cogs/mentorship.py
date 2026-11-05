@@ -2,7 +2,7 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import database
 
 log = logging.getLogger("reveals-assistant.mentorship")
@@ -11,10 +11,6 @@ class Mentorship(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._offboarding: set[tuple[int, int]] = set()
-        self.role_verification.start()
-
-    def cog_unload(self):
-        self.role_verification.cancel()
 
     async def _find_role_assigner(self, guild: discord.Guild, member_id: int, role_id: int):
         # Discord audit-log entries can arrive just after the member update event.
@@ -41,9 +37,8 @@ class Mentorship(commands.Cog):
                              sub: dict | None, role: discord.Role,
                              assigned_by: discord.abc.User | None = None,
                              revoked: bool = False):
-        from .ticketing import LogActionsView, MembershipApprovalView
+        from .ticketing import LogActionsView
         email = (sub or {}).get("email") or "Not recorded"
-        tenure = (sub or {}).get("tenure") or "Pending purchase verification — choose 30 or 90 days"
         embed = discord.Embed(
             title="Mentorship role revoked" if revoked else "Mentorship role assigned",
             color=discord.Color.red() if revoked else discord.Color.green()
@@ -51,26 +46,61 @@ class Mentorship(commands.Cog):
         embed.add_field(name="Discord user", value=f"{member_label} ({user_id})", inline=False)
         embed.add_field(name="Role", value=role.mention, inline=True)
         if not revoked:
-            embed.add_field(
-                name="Assigned by",
-                value=assigned_by.mention if assigned_by else "Unknown (Discord audit log unavailable)",
-                inline=True
-            )
+            embed.add_field(name="Assigned by",
+                            value=assigned_by.mention if assigned_by else "Unknown (Discord audit log unavailable)",
+                            inline=True)
         embed.add_field(name="Email", value=email, inline=True)
-        embed.add_field(name="Access duration", value=tenure, inline=False)
-        if revoked:
-            channel_ids = (cfg.get("role_revoked_channel_id"),)
-            view = LogActionsView(user_id, guild.id)
-        else:
-            channel_ids = (cfg.get("role_assigned_channel_id"),)
-            view = MembershipApprovalView(user_id)
-        for channel_id in channel_ids:
-            channel = guild.get_channel(channel_id) if channel_id else None
-            if isinstance(channel, discord.TextChannel):
-                try:
-                    await channel.send(embed=embed, view=view)
-                except discord.HTTPException:
-                    log.exception("Could not send mentorship role log to %s", channel.id)
+        embed.add_field(name="Access duration", value="Role-based access — no expiry tracking", inline=False)
+        channel_id = cfg.get("role_revoked_channel_id") if revoked else cfg.get("role_assigned_channel_id")
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if isinstance(channel, discord.TextChannel):
+            try:
+                await channel.send(embed=embed, view=LogActionsView(user_id, guild.id) if revoked else None)
+            except discord.HTTPException:
+                log.exception("Could not send mentorship role log to %s", channel.id)
+
+    async def _grant_community_access(self, member: discord.Member, cfg: dict,
+                                      sub: dict | None = None):
+        from .ticketing import create_private_ticket
+        community = self.bot.get_guild(cfg.get("server_b_id"))
+        if community is None:
+            log.error("Server B %s is unavailable; cannot grant access to %s", cfg.get("server_b_id"), member.id)
+            return
+        invite_channel = next((ch for ch in community.text_channels
+                               if community.me and ch.permissions_for(community.me).create_instant_invite), None)
+        if invite_channel is None:
+            log.error("No Server B channel allows Create Instant Invite for member %s", member.id)
+            return
+        try:
+            invite = await invite_channel.create_invite(
+                max_uses=1, max_age=86400, unique=True,
+                reason=f"Payment-verified role assigned to {member.id}"
+            )
+        except discord.HTTPException:
+            log.exception("Could not create Server B invite for %s", member.id)
+            return
+        ticket_id = await database.find_open_ticket(member.guild.id, member.id, "purchase")
+        if ticket_id is None:
+            ticket_id = await database.find_open_ticket(member.guild.id, member.id, "renewal")
+        ticket_channel = member.guild.get_channel(ticket_id) if ticket_id else None
+        if not isinstance(ticket_channel, discord.TextChannel):
+            try:
+                ticket_channel = await create_private_ticket(member.guild, member, cfg, "purchase",
+                                                              (sub or {}).get("email"))
+            except (discord.HTTPException, ValueError):
+                log.exception("Could not create access-delivery ticket for %s", member.id)
+                ticket_channel = None
+        message = (f"Payment verified automatically because you received the configured membership role. "
+                   f"Join Server B using your one-use invite (expires in 24 hours): {invite.url}")
+        try:
+            await member.send(message)
+        except discord.HTTPException:
+            log.warning("Could not DM Server B invite to %s", member.id)
+        if isinstance(ticket_channel, discord.TextChannel):
+            try:
+                await ticket_channel.send(f"{member.mention} {message}")
+            except discord.HTTPException:
+                log.exception("Could not post Server B invite in ticket for %s", member.id)
 
     async def _kick_from_community(self, cfg: dict, user_id: int, reason: str):
         community = self.bot.get_guild(cfg.get("server_b_id"))
@@ -150,8 +180,9 @@ class Mentorship(commands.Cog):
             return
         sub = await database.get_subscription(after.id, after.guild.id)
         if role in after.roles:
-            # The provider or an authorized staff member assigns this role; the bot only logs it.
+            # The configured provider role is the payment-verification signal.
             actor = await self._find_role_assigner(after.guild, after.id, role.id)
+            await self._grant_community_access(after, cfg, sub)
             await self._send_role_log(after.guild, cfg, str(after), after.id, sub, role, assigned_by=actor)
         else:
             await self._offboard(
@@ -159,46 +190,6 @@ class Mentorship(commands.Cog):
                 "Mentorship role removed in Server A", member=after
             )
 
-    @tasks.loop(minutes=20)
-    async def role_verification(self):
-        for source in self.bot.guilds:
-            cfg = await database.get_config(source.id)
-            if not cfg or cfg.get("server_a_id") != source.id:
-                continue
-            role = source.get_role(cfg.get("mentorship_role_id"))
-            if role is None:
-                log.error("Configured mentorship role missing in Server A %s", source.id)
-                continue
-            expired = set(await database.expired_subscriptions(source.id))
-            for sub in await database.active_subscriptions(source.id):
-                user_id = sub["user_id"]
-                member = source.get_member(user_id)
-                if member is None:
-                    try:
-                        member = await source.fetch_member(user_id)
-                    except discord.NotFound:
-                        member = None
-                    except discord.HTTPException:
-                        log.exception("Could not fetch Server A member %s", user_id)
-                        continue
-                if user_id in expired and member and role in member.roles:
-                    try:
-                        await member.remove_roles(role, reason="Mentorship subscription expired")
-                    except discord.HTTPException:
-                        log.exception("Could not remove expired role for %s", user_id)
-                        continue
-                    # The event listener will offboard and notify. The next loop is a retry safety net.
-                    await self._offboard(source, user_id, cfg,
-                                         "Mentorship subscription expired", member=member)
-                elif member is None or role not in member.roles or user_id in expired:
-                    await self._offboard(source, user_id, cfg,
-                                         "20-minute mentorship verification/expiry check",
-                                         member=member)
-                    log.info("Offboarded %s after role verification", user_id)
-
-    @role_verification.before_loop
-    async def before_role_verification(self):
-        await self.bot.wait_until_ready()
 
 async def setup(bot):
     await bot.add_cog(Mentorship(bot))
