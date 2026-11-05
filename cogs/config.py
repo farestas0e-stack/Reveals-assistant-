@@ -67,6 +67,11 @@ class Config(commands.Cog):
             return await interaction.response.send_message("Mentorship role ID is invalid for Server A.", ephemeral=True)
         if not all(isinstance(channel, discord.TextChannel) for channel in (sales, assigned, revoked)):
             return await interaction.response.send_message("Sales/role log IDs must be text channels in Server A.", ephemeral=True)
+        if sales_id in (assigned_id, revoked_id) or assigned_id == revoked_id:
+            return await interaction.response.send_message(
+                "Use three separate channels: sales (screenshots only), role assigned, and role revoked.",
+                ephemeral=True
+            )
         if not isinstance(ticket_category, discord.CategoryChannel) or not isinstance(renewal_category, discord.CategoryChannel):
             return await interaction.response.send_message("Ticket category IDs must identify categories in Server A.", ephemeral=True)
         if staff_id and guild.get_role(staff_id) is None:
