@@ -91,6 +91,8 @@ class Mentorship(commands.Cog):
             except (discord.HTTPException, ValueError):
                 log.exception("Could not create access-delivery ticket for %s", member.id)
                 ticket_channel = None
+        if isinstance(ticket_channel, discord.TextChannel):
+            await database.mark_ticket_access_granted(ticket_channel.id, (sub or {}).get("email"))
         message = (f"Payment verified automatically because you received the configured membership role. "
                    f"Join Server B using your one-use invite (expires in 24 hours): {invite.url}")
         try:
