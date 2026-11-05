@@ -12,7 +12,6 @@ A Python 3.10+ Discord bot for a multi-server mentorship membership workflow. It
 - The ticket provides one membership checkout link. The buyer uploads a payment screenshot; the sales channel receives only the screenshot attachment.
 - SuperProfile purchase and subscription-expired events can be relayed through Pabbly to the bot's authenticated webhook. The bot assigns or removes the configured role and records SuperProfile as the source in the role log.
 - Assigning the configured payment-verified role is the payment confirmation signal. The bot automatically creates a one-use Server B invite and sends it independently in both the member DM and their private ticket. There is no manual approval step and no membership expiry calculation.
-- The same one-use Server B invite is sent independently in the member's DM and private ticket.
 - Purchase/renewal tickets have a Close ticket button. Ticket categories automatically roll over before reaching Discord's category channel limit.
 - Role assignment and revocation logs are sent to separate channels. A role-assigned event is logged once, with the member, role, assigning user (when Discord audit logs expose it), and role-based/no-expiry access status. There are no manual approval buttons.
 - Removing the configured membership role triggers offboarding from Server B and sends renewal instructions. The bot does not calculate membership expiry.
@@ -148,7 +147,7 @@ Use a test account and test payment method first:
 | /setup | Configure Server A/B/C, role, categories, channels and checkout links (Administrator) |
 | /setup_status | Show saved setup status (Administrator) |
 | /mentorship_panel | Post the purchase panel (Administrator) |
-| /membership_status | Inspect active or inactive membership data (Manage Roles) |
+| /membership_status | Check whether the configured membership role is assigned (Manage Roles) |
 | /close_ticket | Close and delete the current registered ticket (Manage Channels) |
 | /broadcast | Broadcast to accessible text channels (Administrator) |
 
