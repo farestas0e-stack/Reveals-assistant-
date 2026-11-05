@@ -350,6 +350,82 @@ class MembershipCheckButton(discord.ui.DynamicItem[discord.ui.Button],
             ephemeral=True
         )
 
+class SendInviteButton(discord.ui.DynamicItem[discord.ui.Button],
+                         template=r"reveals:send_invite:(?P<user_id>[0-9]{1,20})"):
+    def __init__(self, user_id: int):
+        self.user_id = user_id
+        super().__init__(discord.ui.Button(
+            label="Send Server B invite", style=discord.ButtonStyle.success,
+            custom_id=f"reveals:send_invite:{user_id}"
+        ))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["user_id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message(
+                "Only Administrators can issue membership invites.", ephemeral=True
+            )
+        if not interaction.guild:
+            return await interaction.response.send_message("Use this button inside Server A.", ephemeral=True)
+        cfg = await database.get_config(interaction.guild.id)
+        if not cfg:
+            return await interaction.response.send_message("Run /setup first.", ephemeral=True)
+        sub = await database.get_subscription(self.user_id, interaction.guild.id)
+        if not sub or not sub.get("active"):
+            return await interaction.response.send_message(
+                "No active approved membership exists. Verify payment and approve the ticket first.",
+                ephemeral=True
+            )
+        role = interaction.guild.get_role(cfg.get("mentorship_role_id"))
+        member = interaction.guild.get_member(self.user_id)
+        if member is None:
+            try:
+                member = await interaction.guild.fetch_member(self.user_id)
+            except discord.NotFound:
+                return await interaction.response.send_message("The member is no longer in Server A.", ephemeral=True)
+            except discord.HTTPException:
+                return await interaction.response.send_message("Could not fetch the member. Try again.", ephemeral=True)
+        if role is None or role not in member.roles:
+            return await interaction.response.send_message(
+                "The member does not currently have the configured mentorship role.",
+                ephemeral=True
+            )
+        community = interaction.client.get_guild(cfg.get("server_b_id"))
+        if community is None:
+            return await interaction.response.send_message("Server B is unavailable to the bot.", ephemeral=True)
+        invite_channel = next(
+            (channel for channel in community.text_channels
+             if community.me and channel.permissions_for(community.me).create_instant_invite),
+            None
+        )
+        if invite_channel is None:
+            return await interaction.response.send_message(
+                "The bot needs Create Invite permission in a Server B text channel.", ephemeral=True
+            )
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            invite = await invite_channel.create_invite(
+                max_uses=1, max_age=86400, unique=True,
+                reason=f"Administrator-issued membership invite for {self.user_id}"
+            )
+        except discord.HTTPException:
+            return await interaction.followup.send("Discord could not create the invite. Check bot permissions.", ephemeral=True)
+        try:
+            await member.send(
+                f"Your mentorship access is ready. Join Server B using this one-use invite "
+                f"(expires in 24 hours): {invite.url}"
+            )
+            await interaction.followup.send("One-use Server B invite sent by DM.", ephemeral=True)
+        except discord.HTTPException:
+            await interaction.followup.send(
+                f"DM delivery failed. Send this one-use invite to the member: {invite.url}",
+                ephemeral=True
+            )
+
+
 class ConfigStatusButton(discord.ui.DynamicItem[discord.ui.Button],
                             template=r"reveals:config:(?P<guild_id>[0-9]{1,20})"):
     def __init__(self, guild_id: int):
@@ -382,6 +458,7 @@ class LogActionsView(discord.ui.View):
     def __init__(self, user_id: int, guild_id: int):
         super().__init__(timeout=None)
         self.add_item(MembershipCheckButton(user_id))
+        self.add_item(SendInviteButton(user_id))
         self.add_item(ConfigStatusButton(guild_id))
 
 class Ticketing(commands.Cog):
@@ -390,7 +467,7 @@ class Ticketing(commands.Cog):
         bot.add_view(PurchasePanel())
         bot.add_view(PurchaseTierView())
         bot.add_view(EvidenceReviewView())
-        bot.add_dynamic_items(MembershipCheckButton, ConfigStatusButton)
+        bot.add_dynamic_items(MembershipCheckButton, SendInviteButton, ConfigStatusButton)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
