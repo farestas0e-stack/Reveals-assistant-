@@ -37,7 +37,6 @@ class Mentorship(commands.Cog):
                              sub: dict | None, role: discord.Role,
                              assigned_by: discord.abc.User | None = None,
                              revoked: bool = False):
-        from .ticketing import LogActionsView
         email = (sub or {}).get("email") or "Not recorded"
         embed = discord.Embed(
             title="Mentorship role revoked" if revoked else "Mentorship role assigned",
@@ -55,7 +54,7 @@ class Mentorship(commands.Cog):
         channel = guild.get_channel(channel_id) if channel_id else None
         if isinstance(channel, discord.TextChannel):
             try:
-                await channel.send(embed=embed, view=LogActionsView(user_id, guild.id) if revoked else None)
+                await channel.send(embed=embed)
             except discord.HTTPException:
                 log.exception("Could not send mentorship role log to %s", channel.id)
 
