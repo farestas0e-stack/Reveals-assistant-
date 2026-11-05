@@ -106,7 +106,7 @@ class Config(commands.Cog):
             role_assigned_channel_id=assigned_id, role_revoked_channel_id=revoked_id,
             ticket_category_id=ticket_cat_id, renewal_category_id=renewal_cat_id,
             monthly_url=renewal_url.strip(), renewal_url=renewal_url.strip(),
-            quarterly_url=None, staff_role_id=staff_id,
+            staff_role_id=staff_id,
             log_channel_id=log_id
         )
         await interaction.response.send_message(
