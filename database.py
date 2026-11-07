@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
  server_c_id INTEGER, mentorship_role_id INTEGER, sales_channel_id INTEGER,
  audit_channel_id INTEGER, role_assigned_channel_id INTEGER, role_revoked_channel_id INTEGER,
  ticket_category_id INTEGER, renewal_category_id INTEGER, log_channel_id INTEGER,
+ ticket_log_channel_id INTEGER,
  renewal_url TEXT, subscription_days INTEGER NOT NULL DEFAULT 30,
  panel_channel_id INTEGER, panel_message_id INTEGER,
  monthly_url TEXT, staff_role_id INTEGER
@@ -45,7 +46,7 @@ async def init_db() -> None:
             "guild_config": {
                 "monthly_url": "TEXT", "staff_role_id": "INTEGER",
                 "role_assigned_channel_id": "INTEGER", "role_revoked_channel_id": "INTEGER",
-                "renewal_url": "TEXT", "server_c_id": "INTEGER", "log_channel_id": "INTEGER"
+                "renewal_url": "TEXT", "server_c_id": "INTEGER", "log_channel_id": "INTEGER", "ticket_log_channel_id": "INTEGER"
             },
             "subscriptions": {"tenure": "TEXT NOT NULL DEFAULT 'monthly'", "email": "TEXT"},
             "tickets": {
@@ -73,7 +74,7 @@ async def set_config(guild_id: int, **values: Any) -> None:
         "sales_channel_id", "audit_channel_id", "role_assigned_channel_id",
         "role_revoked_channel_id", "ticket_category_id", "renewal_category_id",
         "log_channel_id", "renewal_url", "subscription_days", "panel_channel_id",
-        "panel_message_id", "monthly_url", "staff_role_id"
+        "panel_message_id", "monthly_url", "staff_role_id", "ticket_log_channel_id"
     }
     values = {key: value for key, value in values.items() if key in allowed}
     async with aiosqlite.connect(DB_PATH) as db:
