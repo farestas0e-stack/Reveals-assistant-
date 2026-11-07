@@ -1,9 +1,12 @@
 import re
 import io
+import logging
 import discord
 from discord import app_commands
 from discord.ext import commands
 import database
+
+log = logging.getLogger("reveals-assistant.ticketing")
 
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
