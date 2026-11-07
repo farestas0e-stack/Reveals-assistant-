@@ -1,4 +1,5 @@
 import re
+import io
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -52,22 +53,230 @@ async def create_private_ticket(guild: discord.Guild, member: discord.Member,
         reason=f"{kind} ticket for {member.id}"
     )
     await database.add_ticket(channel.id, guild.id, member.id, kind, submitted_email)
-    title = "Membership purchase ticket" if kind == "purchase" else "Membership renewal ticket"
-    embed = discord.Embed(
-        title=title,
-        description=(f"{member.mention}, use the button below to get the membership checkout link. Complete payment, then "
-                     "upload your receipt if requested. Server B access is granted automatically when "
-                     "the configured membership role is assigned."),
+    welcome = discord.Embed(
+        title="JOIN THE REVEALS CIRCLE",
+        description=(
+            "A step-by-step mentorship to take you from zero to your first $1,000 in clipping, "
+            "and the system to keep scaling after that.\n\n"
+            "Built from 3 years of real clipping experience, with the mistakes, lessons, "
+            "and methods that actually work."
+        ),
         color=discord.Color.blurple()
     )
-    embed.add_field(name="Discord user", value=f"{member} ({member.id})", inline=False)
+    welcome.add_field(
+        name="🎯 What You Get",
+        value=(
+            "• Full roadmap in step-by-step video modules\n"
+            "• 1 exclusive webinar every month\n"
+            "• 1 live Q&A session every month\n"
+            "• Clip reviews\n"
+            "• Private Discord server for members\n"
+            "• Direct access to experienced clippers in the community\n"
+            "• First access to Om's future campaigns and client work"
+        ),
+        inline=False
+    )
+    welcome.add_field(
+        name="📚 Inside the Course",
+        value=(
+            "• Viral Clip Editing Tutorials with Formats\n"
+            "• Proper Account Setup & Warm Up\n"
+            "• How to Avoid Bans & Protect Your Accounts\n"
+            "• Virality, Views & Analytics Explained\n"
+            "• Tier 1 Audience Reach Methods\n"
+            "• How to Escape 0 View Jail\n"
+            "• Proven Methods for Different Platforms\n"
+            "• Clipping Platforms Explained\n"
+            "• How to Get Your First Payout\n"
+            "• Scaling with Multiple Accounts & Systems\n"
+            "• Turning Clipping into a Sustainable Income Source\n"
+            "• Mindset + Longevity in the Clipping Game"
+        ),
+        inline=False
+    )
+    welcome.add_field(
+        name="🎁 Bonuses",
+        value=(
+            "• Curated Asset Packs (Presets, SFX, Overlays)\n"
+            "• Exclusive Tool Deals (VPN, AI Clipper & More)\n"
+            "• Regular Campaign Opportunity Updates"
+        ),
+        inline=False
+    )
+    welcome.add_field(name="Discord member", value=f"{member.mention} ({member.id})", inline=False)
     if submitted_email:
-        embed.add_field(name="Payment email", value=submitted_email, inline=False)
-    cfg_url = cfg.get("renewal_url") or cfg.get("monthly_url")
-    if cfg_url:
-        embed.add_field(name="Checkout", value="Use the Get membership link button below.", inline=False)
-    await channel.send(embed=embed, view=PurchaseTierView())
-    return channel
+        welcome.add_field(name="Payment email", value=submitted_email, inline=False)
+    welcome.set_footer(text="Reveals Circle • Membership support")
+    await channel.send(embed=welcome)
+
+    instructions = discord.Embed(
+        title="Your private mentorship ticket",
+        description=(
+            f"{member.mention}, use the button below to open the membership checkout link. "
+            "After completing payment, your configured membership role will be assigned "
+            "automatically and Server B access will be delivered."
+        ),
+        color=discord.Color.dark_teal()
+    )
+    if cfg.get("renewal_url") or cfg.get("monthly_url"):
+        instructions.add_field(
+            name="Checkout",
+            value="Select **Get membership link** below. Keep this ticket open until your access is delivered.",
+            inline=False
+        )
+    await channel.send(embed=instructions, view=PurchaseTierView())
+
+
+async def _ticket_transcript(channel: discord.TextChannel) -> tuple[bytes, int, bool]:
+    lines = [
+        f"Ticket transcript: #{channel.name}",
+        f"Guild: {channel.guild.name} ({channel.guild.id})",
+        f"Channel ID: {channel.id}",
+        "=" * 72,
+        ""
+    ]
+    count = 0
+    truncated = False
+    async for message in channel.history(limit=None, oldest_first=True):
+        count += 1
+        timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+        author = f"{message.author} ({message.author.id})"
+        lines.append(f"[{timestamp}] {author}")
+        if message.content:
+            lines.append(message.clean_content)
+        for embed in message.embeds:
+            if embed.title:
+                lines.append(f"[Embed title] {embed.title}")
+            if embed.description:
+                lines.append(f"[Embed description] {embed.description}")
+            for field in embed.fields:
+                lines.append(f"[{field.name}] {field.value}")
+        for attachment in message.attachments:
+            lines.append(f"[Attachment: {attachment.filename}] {attachment.url}")
+        if message.stickers:
+            lines.append("[Sticker] " + ", ".join(sticker.name for sticker in message.stickers))
+        lines.append("")
+        if sum(len(line) + 1 for line in lines) > 1_500_000:
+            truncated = True
+            lines.append("[Transcript truncated to remain within Discord upload limits.]")
+            break
+    if count == 0:
+        lines.append("No messages were found in this ticket.")
+    return "\n".join(lines).encode("utf-8", errors="replace"), count, truncated
+
+
+async def _prompt_ticket_close(interaction: discord.Interaction, ticket: dict):
+    embed = discord.Embed(
+        title="Confirm ticket closure",
+        description=(
+            "This action will create a transcript, send the ticket details and transcript "
+            "together as **one log message**, then delete this ticket channel.\n\n"
+            "**Are you sure you want to close this ticket?**"
+        ),
+        color=discord.Color.orange()
+    )
+    await interaction.response.send_message(
+        embed=embed,
+        view=ConfirmTicketCloseView(interaction.user.id),
+        ephemeral=True
+    )
+
+
+async def _complete_ticket_close(interaction: discord.Interaction, requester_id: int):
+    if interaction.user.id != requester_id:
+        return await interaction.response.send_message(
+            "Only the person who requested closure can confirm it.", ephemeral=True
+        )
+    ticket = await database.get_ticket(interaction.channel_id)
+    if not ticket or ticket["guild_id"] != interaction.guild_id:
+        return await interaction.response.send_message("Not a registered ticket.", ephemeral=True)
+    is_owner = ticket["user_id"] == interaction.user.id
+    can_manage = (
+        interaction.user.guild_permissions.manage_channels
+        or interaction.user.guild_permissions.administrator
+    )
+    if not is_owner and not can_manage:
+        return await interaction.response.send_message(
+            "Only the ticket owner or staff can close this ticket.", ephemeral=True
+        )
+    channel = interaction.channel
+    if not isinstance(channel, discord.TextChannel):
+        return await interaction.response.send_message("Ticket channel is unavailable.", ephemeral=True)
+    cfg = await database.get_config(ticket["guild_id"])
+    log_channel = channel.guild.get_channel(cfg.get("ticket_log_channel_id")) if cfg else None
+    if not isinstance(log_channel, discord.TextChannel):
+        return await interaction.response.send_message(
+            "Ticket logging is not configured. An administrator must set the Ticket logs / transcripts channel in /setup. The ticket has not been closed.",
+            ephemeral=True
+        )
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        transcript, message_count, truncated = await _ticket_transcript(channel)
+        owner = channel.guild.get_member(ticket["user_id"])
+        owner_label = f"{owner} ({ticket['user_id']})" if owner else f"User ID {ticket['user_id']}"
+        closed_embed = discord.Embed(
+            title="Ticket closed",
+            description=(
+                f"**Ticket:** #{channel.name}\n"
+                f"**Ticket type:** {ticket['ticket_type'].title()}\n"
+                f"**Opened by:** {owner_label}\n"
+                f"**Closed by:** {interaction.user.mention} ({interaction.user.id})\n"
+                f"**Payment email:** {ticket.get('submitted_email') or 'Not provided'}\n"
+                f"**Messages captured:** {message_count}\n"
+                f"**Transcript:** {'Truncated to fit upload limits' if truncated else 'Complete'}"
+            ),
+            color=discord.Color.dark_grey(),
+            timestamp=discord.utils.utcnow()
+        )
+        closed_embed.set_footer(text=f"Ticket channel ID: {channel.id}")
+        transcript_file = discord.File(
+            io.BytesIO(transcript),
+            filename=f"ticket-{channel.id}-transcript.txt"
+        )
+        await log_channel.send(embed=closed_embed, file=transcript_file)
+    except (discord.HTTPException, OSError):
+        log.exception("Could not save transcript for ticket %s", channel.id)
+        return await interaction.followup.send(
+            "The transcript could not be sent to the ticket log channel. The ticket has been left open.",
+            ephemeral=True
+        )
+
+    await database.close_ticket(channel.id)
+    try:
+        await channel.delete(reason=f"Ticket closed by {interaction.user.id}; transcript saved")
+    except discord.HTTPException:
+        log.exception("Transcript saved, but ticket channel %s could not be deleted", channel.id)
+        return await interaction.followup.send(
+            "The transcript was saved, but Discord could not delete the ticket channel. Staff can delete it manually.",
+            ephemeral=True
+        )
+    await interaction.followup.send(
+        "Ticket transcript saved and ticket closed successfully.", ephemeral=True
+    )
+
+
+class ConfirmTicketCloseView(discord.ui.View):
+    def __init__(self, requester_id: int):
+        super().__init__(timeout=90)
+        self.requester_id = requester_id
+
+    @discord.ui.button(label="Confirm close", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _complete_ticket_close(interaction, self.requester_id)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.requester_id:
+            return await interaction.response.send_message(
+                "Only the person who requested closure can cancel it.", ephemeral=True
+            )
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content="Ticket closure cancelled. The ticket remains open.",
+            embed=None, view=self
+        )
 
 class PurchaseEmailModal(discord.ui.Modal, title="Purchase Mentorship"):
     payment_email = discord.ui.TextInput(
@@ -131,7 +340,12 @@ class PurchaseTierView(discord.ui.View):
         url = (cfg.get("renewal_url") or cfg.get("monthly_url")) if cfg else None
         if not url or not url.startswith(("https://", "http://")):
             return await interaction.response.send_message("The membership checkout link is not configured. Contact staff.", ephemeral=True)
-        await interaction.response.send_message(f"Membership checkout link: {url}", ephemeral=True)
+        checkout_embed = discord.Embed(
+            title="Membership checkout",
+            description=f"Continue securely using the link below.\n\n[Open checkout]({url})",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=checkout_embed, ephemeral=True)
 
     @discord.ui.button(label="Close ticket", style=discord.ButtonStyle.danger,
                        custom_id="reveals:ticket_close")
@@ -143,27 +357,7 @@ class PurchaseTierView(discord.ui.View):
         can_manage = interaction.user.guild_permissions.manage_channels or interaction.user.guild_permissions.administrator
         if not is_owner and not can_manage:
             return await interaction.response.send_message("Only the ticket owner or staff can close this ticket.", ephemeral=True)
-        await database.close_ticket(interaction.channel_id)
-        await interaction.response.send_message("Ticket closed. This channel will now be deleted.", ephemeral=True)
-        await interaction.channel.delete(reason=f"Ticket closed by {interaction.user.id}")
-
-class CloseTicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Close ticket", style=discord.ButtonStyle.danger,
-                       custom_id="reveals:ticket_close")
-    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        ticket = await database.get_ticket(interaction.channel_id)
-        if not ticket or ticket["guild_id"] != interaction.guild_id:
-            return await interaction.response.send_message("Not a registered ticket.", ephemeral=True)
-        is_owner = ticket["user_id"] == interaction.user.id
-        can_manage = interaction.user.guild_permissions.manage_channels or interaction.user.guild_permissions.administrator
-        if not is_owner and not can_manage:
-            return await interaction.response.send_message("Only the ticket owner or staff can close this ticket.", ephemeral=True)
-        await database.close_ticket(interaction.channel_id)
-        await interaction.response.send_message("Ticket closed. This channel will now be deleted.", ephemeral=True)
-        await interaction.channel.delete(reason=f"Ticket closed by {interaction.user.id}")
+        await _prompt_ticket_close(interaction, ticket)
 
 class Ticketing(commands.Cog):
     def __init__(self, bot):
@@ -186,10 +380,19 @@ class Ticketing(commands.Cog):
             await database.set_evidence(message.channel.id, message.id)
         cfg = await database.get_config(message.guild.id)
         staff_role = message.guild.get_role(cfg.get("staff_role_id")) if cfg and cfg.get("staff_role_id") else None
+        received_embed = discord.Embed(
+            title="Payment screenshot received",
+            description=(
+                "Your screenshot has been forwarded to the sales log. "
+                "Server B access is granted automatically when the configured membership role is assigned."
+            ),
+            color=discord.Color.green(),
+            timestamp=message.created_at
+        )
+        received_embed.set_footer(text="Reveals Circle • Keep this ticket open until access is delivered")
         await message.channel.send(
-            (f"{staff_role.mention} " if staff_role else "") +
-            "Payment screenshot received and forwarded to the sales log. "
-            "Server B access is granted automatically when the configured membership role is assigned.",
+            content=(staff_role.mention if staff_role else None),
+            embed=received_embed,
             allowed_mentions=discord.AllowedMentions(roles=True, everyone=False)
         )
         sales_log = message.guild.get_channel(cfg.get("sales_channel_id")) if cfg and cfg.get("sales_channel_id") else None
@@ -248,9 +451,7 @@ class Ticketing(commands.Cog):
         ticket = await database.get_ticket(interaction.channel_id)
         if not ticket or ticket["guild_id"] != interaction.guild_id:
             return await interaction.response.send_message("Not a registered ticket.", ephemeral=True)
-        await database.close_ticket(interaction.channel_id)
-        await interaction.response.send_message("Closing ticket.", ephemeral=True)
-        await interaction.channel.delete(reason=f"Ticket closed by {interaction.user.id}")
+        await _prompt_ticket_close(interaction, ticket)
 
 async def setup(bot):
     await bot.add_cog(Ticketing(bot))
