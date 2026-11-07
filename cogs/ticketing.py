@@ -52,7 +52,7 @@ async def create_private_ticket(guild: discord.Guild, member: discord.Member,
             overwrites[role] = discord.PermissionOverwrite(view_channel=True,
                 send_messages=True, read_message_history=True, manage_messages=True)
     channel = await guild.create_text_channel(
-        name=f"{kind}-{member.id}"[:90], category=category, overwrites=overwrites,
+        name=f"{kind}-{re.sub(r'[^a-z0-9-]+', '-', member.display_name.lower()).strip('-') or 'member'}"[:90], category=category, overwrites=overwrites,
         reason=f"{kind} ticket for {member.id}"
     )
     await database.add_ticket(channel.id, guild.id, member.id, kind, submitted_email)
@@ -106,7 +106,7 @@ async def create_private_ticket(guild: discord.Guild, member: discord.Member,
         ),
         inline=False
     )
-    welcome.add_field(name="Discord member", value=f"{member.mention} ({member.id})", inline=False)
+    welcome.add_field(name="Discord member", value=f"{member.display_name} ({member.mention})", inline=False)
     if submitted_email:
         welcome.add_field(name="Payment email", value=submitted_email, inline=False)
     welcome.set_footer(text="Reveals Circle • Membership support")
