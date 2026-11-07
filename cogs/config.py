@@ -124,6 +124,19 @@ class Config(commands.Cog):
             ephemeral=True
         )
 
+    @app_commands.command(name="set_ticket_log", description="Set the channel for ticket closure logs and transcripts.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def set_ticket_log(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        if interaction.guild is None:
+            return await interaction.response.send_message("Run this command inside Server A.", ephemeral=True)
+        await database.set_config(interaction.guild.id, ticket_log_channel_id=channel.id)
+        embed = discord.Embed(
+            title="Ticket transcript logging configured",
+            description=f"Ticket closure logs and transcript files will be sent to {channel.mention}.",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @app_commands.command(name="setup_status", description="Show the saved bot configuration.")
     @app_commands.checks.has_permissions(administrator=True)
     async def setup_status(self, interaction: discord.Interaction):
