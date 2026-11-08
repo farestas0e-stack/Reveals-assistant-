@@ -32,10 +32,6 @@ CREATE TABLE IF NOT EXISTS tickets (
  created_at TEXT NOT NULL, approved_at TEXT, closed_at TEXT, tenure TEXT,
  evidence_message_id INTEGER, approval_status TEXT NOT NULL DEFAULT 'pending'
 );
-CREATE TABLE IF NOT EXISTS category_removal_usage (
- guild_id INTEGER PRIMARY KEY,
- uses INTEGER NOT NULL DEFAULT 0
-);
 """
 
 async def _columns(db, table: str) -> set[str]:
@@ -90,38 +86,6 @@ async def set_config(guild_id: int, **values: Any) -> None:
                 (*values.values(), guild_id)
             )
         await db.commit()
-
-async def claim_category_removal(guild_id: int, limit: int = 3) -> tuple[bool, int]:
-    """Atomically consume one of a guild's limited category-removal uses."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("BEGIN IMMEDIATE")
-        await db.execute(
-            "INSERT OR IGNORE INTO category_removal_usage(guild_id, uses) VALUES(?, 0)",
-            (guild_id,)
-        )
-        row = await (await db.execute(
-            "SELECT uses FROM category_removal_usage WHERE guild_id=?",
-            (guild_id,)
-        )).fetchone()
-        used = int(row[0]) if row else 0
-        if used >= limit:
-            await db.commit()
-            return False, used
-        used += 1
-        await db.execute(
-            "UPDATE category_removal_usage SET uses=? WHERE guild_id=?",
-            (used, guild_id)
-        )
-        await db.commit()
-        return True, used
-
-async def category_removal_uses(guild_id: int) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        row = await (await db.execute(
-            "SELECT uses FROM category_removal_usage WHERE guild_id=?",
-            (guild_id,)
-        )).fetchone()
-        return int(row[0]) if row else 0
 
 async def save_subscription(user_id: int, guild_a_id: int, days: int,
                             tenure: str, email: str | None = None) -> None:
