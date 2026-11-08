@@ -3,7 +3,7 @@ import io
 import logging
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 import database
 
 log = logging.getLogger("reveals-assistant.ticketing")
@@ -259,6 +259,77 @@ async def _complete_ticket_close(interaction: discord.Interaction, requester_id:
     )
 
 
+
+async def _auto_close_purchase_ticket(channel: discord.TextChannel, ticket: dict) -> bool:
+    cfg = await database.get_config(ticket["guild_id"])
+    log_channel = channel.guild.get_channel(cfg.get("ticket_log_channel_id")) if cfg else None
+    if not isinstance(log_channel, discord.TextChannel):
+        log.warning("Cannot auto-close ticket %s: transcript log channel is not configured", channel.id)
+        return False
+    try:
+        transcript, message_count, truncated = await _ticket_transcript(channel)
+        owner = channel.guild.get_member(ticket["user_id"])
+        owner_label = f"{owner} ({ticket['user_id']})" if owner else f"User ID {ticket['user_id']}"
+        closed_embed = discord.Embed(
+            title="Purchase ticket automatically closed",
+            description=(
+                f"**Ticket:** #{channel.name}\n"
+                f"**Opened by:** {owner_label}\n"
+                "**Reason:** Six unanswered purchase reminders\n"
+                f"**Messages captured:** {message_count}\n"
+                f"**Transcript:** {'Truncated to fit upload limits' if truncated else 'Complete'}"
+            ),
+            color=discord.Color.dark_grey(),
+            timestamp=discord.utils.utcnow()
+        )
+        closed_embed.set_footer(text=f"Ticket channel ID: {channel.id}")
+        await log_channel.send(
+            embed=closed_embed,
+            file=discord.File(io.BytesIO(transcript), filename=f"ticket-{channel.id}-transcript.txt")
+        )
+        await database.close_ticket(channel.id)
+        await channel.delete(reason="Automatically closed after six unanswered purchase reminders")
+        return True
+    except (discord.HTTPException, OSError):
+        log.exception("Automatic ticket closure failed for %s", channel.id)
+        return False
+
+
+class PurchaseReminderView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Delay next warning by 6 hours",
+        style=discord.ButtonStyle.secondary,
+        custom_id="reveals:purchase_reminder_delay"
+    )
+    async def delay(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ticket = await database.get_ticket(interaction.channel_id)
+        if not ticket or ticket["ticket_type"] != "purchase" or ticket["approval_status"] != "pending":
+            return await interaction.response.send_message("This purchase ticket is no longer pending.", ephemeral=True)
+        if interaction.user.id != ticket["user_id"]:
+            return await interaction.response.send_message("Only the ticket owner can delay a reminder.", ephemeral=True)
+        if not await database.delay_ticket_reminder(interaction.channel_id, 6):
+            return await interaction.response.send_message("This ticket can no longer be delayed.", ephemeral=True)
+        await interaction.response.send_message("Next reminder delayed by 6 hours.", ephemeral=True)
+
+    @discord.ui.button(
+        label="Admin: extend by 24 hours",
+        style=discord.ButtonStyle.primary,
+        custom_id="reveals:purchase_reminder_admin_extend"
+    )
+    async def admin_extend(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("Only server administrators can extend this ticket.", ephemeral=True)
+        ticket = await database.get_ticket(interaction.channel_id)
+        if not ticket or ticket["ticket_type"] != "purchase" or ticket["approval_status"] != "pending":
+            return await interaction.response.send_message("This purchase ticket is no longer pending.", ephemeral=True)
+        if not await database.delay_ticket_reminder(interaction.channel_id, 24):
+            return await interaction.response.send_message("This ticket can no longer be extended.", ephemeral=True)
+        await interaction.response.send_message("Administrator extended the ticket by 24 hours.", ephemeral=False)
+
+
 class ConfirmTicketCloseView(discord.ui.View):
     def __init__(self, requester_id: int):
         super().__init__(timeout=90)
@@ -367,6 +438,68 @@ class Ticketing(commands.Cog):
         self.bot = bot
         bot.add_view(PurchasePanel())
         bot.add_view(PurchaseTierView())
+
+        bot.add_view(PurchaseReminderView())
+        self.purchase_ticket_reminders.start()
+
+    def cog_unload(self):
+        self.purchase_ticket_reminders.cancel()
+
+    @tasks.loop(minutes=1)
+    async def purchase_ticket_reminders(self):
+        due_tickets = await database.due_purchase_ticket_reminders()
+        for ticket in due_tickets:
+            channel = self.bot.get_channel(ticket["channel_id"])
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            if int(ticket.get("reminder_count") or 0) >= 6:
+                if not await _auto_close_purchase_ticket(channel, ticket):
+                    await database.retry_ticket_auto_close(channel.id)
+                continue
+
+            count = await database.advance_ticket_reminder(channel.id)
+            if count is None:
+                continue
+            if count >= 6:
+                final_embed = discord.Embed(
+                    title="Final purchase reminder — ticket closing",
+                    description=(
+                        f"{channel.guild.get_member(ticket['user_id']).mention if channel.guild.get_member(ticket['user_id']) else 'Ticket owner'}, "
+                        "this is reminder **6 of 6**. The ticket is now being automatically closed. "
+                        "If you still want to purchase, please open a new ticket."
+                    ),
+                    color=discord.Color.red()
+                )
+                try:
+                    await channel.send(embed=final_embed)
+                except discord.HTTPException:
+                    log.exception("Could not send final reminder in ticket %s", channel.id)
+                if not await _auto_close_purchase_ticket(channel, ticket):
+                    await database.retry_ticket_auto_close(channel.id)
+                continue
+
+            member = channel.guild.get_member(ticket["user_id"])
+            mention = member.mention if member else "there"
+            reminder = discord.Embed(
+                title=f"Purchase reminder {count}/6",
+                description=(
+                    f"{mention}, are you still interested in joining **The Reveals Circle**?\\n\\n"
+                    "Choose **Get membership link** in the ticket to continue, or close the ticket if you no longer want to purchase. "
+                    "This reminder will repeat every 6 hours while the ticket remains pending. "
+                    "After 6 reminders, the ticket will automatically close."
+                ),
+                color=discord.Color.orange()
+            )
+            reminder.set_footer(text="You can delay the next reminder by 6 hours. Administrators can extend the ticket by 24 hours.")
+            try:
+                await channel.send(embed=reminder, view=PurchaseReminderView())
+            except discord.HTTPException:
+                log.exception("Could not send purchase reminder in ticket %s", channel.id)
+
+    @purchase_ticket_reminders.before_loop
+    async def before_purchase_ticket_reminders(self):
+        await self.bot.wait_until_ready()
+
 
 
     @commands.Cog.listener()
