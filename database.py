@@ -269,7 +269,7 @@ async def advance_ticket_reminder(channel_id: int) -> int | None:
         count = int(row[0]) + 1
         if count >= 6:
             await db.execute(
-                "UPDATE tickets SET reminder_count=?,next_reminder_at=NULL WHERE channel_id=?",
+                "UPDATE tickets SET reminder_count=?,next_reminder_at=datetime('now','+6 hours') WHERE channel_id=?",
                 (count, channel_id)
             )
         else:
@@ -289,7 +289,6 @@ async def delay_ticket_reminder(channel_id: int, hours: int) -> bool:
             UPDATE tickets SET next_reminder_at=datetime('now', ?)
             WHERE channel_id=? AND ticket_type='purchase'
               AND approval_status='pending' AND closed_at IS NULL
-              AND reminder_count<6
         """, (f"+{hours} hours", channel_id))
         await db.commit()
         return cursor.rowcount == 1
