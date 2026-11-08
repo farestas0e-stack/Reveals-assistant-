@@ -37,6 +37,7 @@ class RevealsBot(commands.Bot):
             "cogs.broadcast",
             "cogs.moderation",
             "cogs.embed_sender",
+            "cogs.category_tools",
         )
         for extension in extensions:
             await self.load_extension(extension)
