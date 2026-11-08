@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS tickets (
  channel_id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
  ticket_type TEXT NOT NULL, submitted_email TEXT, verified_email TEXT,
  created_at TEXT NOT NULL, approved_at TEXT, closed_at TEXT, tenure TEXT,
- evidence_message_id INTEGER, approval_status TEXT NOT NULL DEFAULT 'pending'
+ evidence_message_id INTEGER, approval_status TEXT NOT NULL DEFAULT 'pending',
+ reminder_count INTEGER NOT NULL DEFAULT 0, next_reminder_at TEXT
 );
 """
 
@@ -52,7 +53,8 @@ async def init_db() -> None:
             "tickets": {
                 "submitted_email": "TEXT", "verified_email": "TEXT", "approved_at": "TEXT",
                 "closed_at": "TEXT", "tenure": "TEXT", "evidence_message_id": "INTEGER",
-                "approval_status": "TEXT NOT NULL DEFAULT 'pending'"
+                "approval_status": "TEXT NOT NULL DEFAULT 'pending'",
+                "reminder_count": "INTEGER NOT NULL DEFAULT 0", "next_reminder_at": "TEXT"
             }
         }
         for table, wanted in migrations.items():
@@ -144,9 +146,9 @@ async def add_ticket(channel_id: int, guild_id: int, user_id: int,
         await db.execute("""
             INSERT OR REPLACE INTO tickets
             (channel_id,guild_id,user_id,ticket_type,submitted_email,created_at,
-             approved_at,closed_at,tenure,evidence_message_id,approval_status)
-            VALUES(?,?,?,?,?,datetime('now'),NULL,NULL,NULL,NULL,'pending')
-        """, (channel_id, guild_id, user_id, ticket_type, email))
+             approved_at,closed_at,tenure,evidence_message_id,approval_status,reminder_count,next_reminder_at)
+            VALUES(?,?,?,?,?,datetime('now'),NULL,NULL,NULL,NULL,'pending',0,CASE WHEN ?='purchase' THEN datetime('now','+6 hours') ELSE NULL END)
+        """, (channel_id, guild_id, user_id, ticket_type, email, ticket_type))
         await db.commit()
 
 async def get_ticket(channel_id: int) -> dict[str, Any] | None:
@@ -240,6 +242,67 @@ async def close_ticket(channel_id: int) -> None:
         )
         await db.commit()
 
+
+
+async def due_purchase_ticket_reminders() -> list[dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute("""
+            SELECT * FROM tickets
+            WHERE ticket_type='purchase' AND approval_status='pending'
+              AND closed_at IS NULL AND next_reminder_at IS NOT NULL
+              AND next_reminder_at<=datetime('now')
+            ORDER BY next_reminder_at
+        """)).fetchall()
+        return [dict(row) for row in rows]
+
+
+async def advance_ticket_reminder(channel_id: int) -> int | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        row = await (await db.execute("""
+            SELECT reminder_count FROM tickets
+            WHERE channel_id=? AND ticket_type='purchase'
+              AND approval_status='pending' AND closed_at IS NULL
+        """, (channel_id,))).fetchone()
+        if not row:
+            return None
+        count = int(row[0]) + 1
+        if count >= 6:
+            await db.execute(
+                "UPDATE tickets SET reminder_count=?,next_reminder_at=NULL WHERE channel_id=?",
+                (count, channel_id)
+            )
+        else:
+            await db.execute("""
+                UPDATE tickets SET reminder_count=?,next_reminder_at=datetime('now','+6 hours')
+                WHERE channel_id=?
+            """, (count, channel_id))
+        await db.commit()
+        return count
+
+
+async def delay_ticket_reminder(channel_id: int, hours: int) -> bool:
+    if hours not in (6, 24):
+        raise ValueError("Reminder delay must be 6 or 24 hours.")
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            UPDATE tickets SET next_reminder_at=datetime('now', ?)
+            WHERE channel_id=? AND ticket_type='purchase'
+              AND approval_status='pending' AND closed_at IS NULL
+              AND reminder_count<6
+        """, (f"+{hours} hours", channel_id))
+        await db.commit()
+        return cursor.rowcount == 1
+
+
+async def retry_ticket_auto_close(channel_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            UPDATE tickets SET next_reminder_at=datetime('now','+1 hour')
+            WHERE channel_id=? AND ticket_type='purchase'
+              AND approval_status='pending' AND closed_at IS NULL
+        """, (channel_id,))
+        await db.commit()
 
 async def claim_provider_event(provider: str, event_id: str, event_type: str) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
