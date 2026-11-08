@@ -460,24 +460,6 @@ class Ticketing(commands.Cog):
             count = await database.advance_ticket_reminder(channel.id)
             if count is None:
                 continue
-            if count >= 6:
-                final_embed = discord.Embed(
-                    title="Final purchase reminder — ticket closing",
-                    description=(
-                        f"{channel.guild.get_member(ticket['user_id']).mention if channel.guild.get_member(ticket['user_id']) else 'Ticket owner'}, "
-                        "this is reminder **6 of 6**. The ticket is now being automatically closed. "
-                        "If you still want to purchase, please open a new ticket."
-                    ),
-                    color=discord.Color.red()
-                )
-                try:
-                    await channel.send(embed=final_embed)
-                except discord.HTTPException:
-                    log.exception("Could not send final reminder in ticket %s", channel.id)
-                if not await _auto_close_purchase_ticket(channel, ticket):
-                    await database.retry_ticket_auto_close(channel.id)
-                continue
-
             member = channel.guild.get_member(ticket["user_id"])
             mention = member.mention if member else "there"
             reminder = discord.Embed(
