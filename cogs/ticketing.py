@@ -463,12 +463,12 @@ class Ticketing(commands.Cog):
             member = channel.guild.get_member(ticket["user_id"])
             mention = member.mention if member else "there"
             reminder = discord.Embed(
-                title=f"Purchase reminder {count}/6",
+                title=(f"Final purchase reminder {count}/6" if count == 6 else f"Purchase reminder {count}/6"),
                 description=(
-                    f"{mention}, are you still interested in joining **The Reveals Circle**?\\n\\n"
+                    f"{mention}, are you still interested in joining **The Reveals Circle**?\n\n"
                     "Choose **Get membership link** in the ticket to continue, or close the ticket if you no longer want to purchase. "
                     "This reminder will repeat every 6 hours while the ticket remains pending. "
-                    "After 6 reminders, the ticket will automatically close."
+                    + ("This is the sixth reminder. The ticket will automatically close in 6 hours unless you delay it or an administrator extends it." if count == 6 else "After 6 reminders, the ticket will automatically close.")
                 ),
                 color=discord.Color.orange()
             )
