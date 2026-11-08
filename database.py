@@ -62,6 +62,11 @@ async def init_db() -> None:
             for name, definition in wanted.items():
                 if name not in existing:
                     await db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+        await db.execute("""
+            UPDATE tickets SET next_reminder_at=datetime('now','+6 hours')
+            WHERE ticket_type='purchase' AND approval_status='pending'
+              AND closed_at IS NULL AND next_reminder_at IS NULL
+        """)
         await db.commit()
 
 async def get_config(guild_id: int) -> dict[str, Any] | None:
