@@ -199,6 +199,7 @@ class Mentorship(commands.Cog):
 
                 # Fetch complete current membership rather than trusting a possibly stale cache.
                 source_members = [member async for member in source.fetch_members(limit=None)]
+                source_by_id = {member.id: member for member in source_members}
                 verified = {member.id: member for member in source_members if role in member.roles}
                 community_members = [member async for member in community.fetch_members(limit=None)]
                 community_ids = {member.id for member in community_members}
@@ -221,8 +222,9 @@ class Mentorship(commands.Cog):
 
                 # Anyone in Server B without the live verified role is removed.
                 for community_member in community_members:
-                    source_member = next((m for m in source_members if m.id == community_member.id), None)
-                    if source_member is None or role not in source_member.roles:
+                    source_member = source_by_id.get(community_member.id)
+                    # Preserve Server B staff/unrelated accounts not present in Server A.
+                    if source_member is not None and role not in source_member.roles:
                         try:
                             await self._offboard(
                                 source, community_member.id, cfg,
