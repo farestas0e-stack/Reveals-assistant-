@@ -149,29 +149,13 @@ class Mentorship(commands.Cog):
                 message = f"Your mentorship access has ended. Renew your access here: {renewal_url}"
             else:
                 message = "Your mentorship access has ended. Please contact the team to renew."
-            dm_sent = False
             try:
                 user = await self.bot.fetch_user(user_id)
                 await user.send(message)
-                dm_sent = True
             except discord.HTTPException:
-                log.info("Renewal DM could not be delivered to %s", user_id)
-            if not dm_sent:
-                current_member = member or source.get_member(user_id)
-                if current_member:
-                    try:
-                        from .ticketing import create_private_ticket
-                        await create_private_ticket(source, current_member, cfg, "renewal",
-                                                    (sub or {}).get("email"))
-                    except (discord.HTTPException, ValueError):
-                        log.exception("Could not create renewal ticket for %s", user_id)
-                else:
-                    sales = source.get_channel(cfg.get("sales_channel_id"))
-                    if isinstance(sales, discord.TextChannel):
-                        await sales.send(
-                            f"Renewal DM failed and user {user_id} is no longer in Server A. "
-                            "Contact them through the verified support channel."
-                        )
+                # Never create a renewal ticket as a fallback. The member is still
+                # removed from Server B; a failed DM is recorded for staff visibility.
+                log.info("Renewal DM could not be delivered to %s; no renewal ticket created", user_id)
             await database.deactivate_subscription(user_id, source.id)
             role = source.get_role(cfg.get("mentorship_role_id"))
             if role:
