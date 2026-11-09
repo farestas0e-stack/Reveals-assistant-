@@ -63,7 +63,7 @@ async def init_db() -> None:
                 if name not in existing:
                     await db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
         await db.execute("""
-            UPDATE tickets SET next_reminder_at=datetime('now','+6 hours')
+            UPDATE tickets SET next_reminder_at=datetime('now','+8 hours')
             WHERE ticket_type='purchase' AND approval_status='pending'
               AND closed_at IS NULL AND next_reminder_at IS NULL
         """)
@@ -287,8 +287,8 @@ async def advance_ticket_reminder(channel_id: int) -> int | None:
 
 
 async def delay_ticket_reminder(channel_id: int, hours: int) -> bool:
-    if hours not in (6, 24):
-        raise ValueError("Reminder delay must be 6 or 24 hours.")
+    if hours not in (8, 24):
+        raise ValueError("Reminder delay must be 8 or 24 hours.")
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("""
             UPDATE tickets SET next_reminder_at=datetime('now', ?)
