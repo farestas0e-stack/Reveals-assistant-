@@ -1,26 +1,20 @@
 import logging
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import database
 
 log = logging.getLogger("reveals-assistant.mentorship")
-
 
 class Mentorship(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._offboarding: set[tuple[int, int]] = set()
         self._superprofile_assignments: dict[tuple[int, int], dict] = {}
-        # Prevent a fresh 24-hour invite being generated every 15-minute pass.
-        self._reconcile_invite_sent: dict[tuple[int, int], datetime] = {}
-        self.access_reconciliation.start()
-
-    def cog_unload(self):
-        self.access_reconciliation.cancel()
 
     async def _find_role_assigner(self, guild: discord.Guild, member_id: int, role_id: int):
+        # Discord audit-log entries can arrive just after the member update event.
         await asyncio.sleep(1)
         try:
             async for entry in guild.audit_logs(limit=12, action=discord.AuditLogAction.member_role_update):
@@ -57,7 +51,7 @@ class Mentorship(commands.Cog):
                             value=assigned_by_label or (assigned_by.mention if assigned_by else "Unknown (Discord audit log unavailable)"),
                             inline=True)
         embed.add_field(name="Email", value=email, inline=True)
-        embed.add_field(name="Access duration", value="Role-based access — verified every 15 minutes", inline=False)
+        embed.add_field(name="Access duration", value="Role-based access — no expiry tracking", inline=False)
         channel_id = cfg.get("role_revoked_channel_id") if revoked else cfg.get("role_assigned_channel_id")
         channel = guild.get_channel(channel_id) if channel_id else None
         if isinstance(channel, discord.TextChannel):
@@ -101,20 +95,15 @@ class Mentorship(commands.Cog):
             await database.mark_ticket_access_granted(ticket_channel.id, (sub or {}).get("email"))
         message = (f"Payment verified automatically because you received the configured membership role. "
                    f"Join Server B using your one-use invite (expires in 24 hours): {invite.url}")
-        delivered = False
         try:
             await member.send(message)
-            delivered = True
         except discord.HTTPException:
             log.warning("Could not DM Server B invite to %s", member.id)
         if isinstance(ticket_channel, discord.TextChannel):
             try:
                 await ticket_channel.send(f"{member.mention} {message}")
-                delivered = True
             except discord.HTTPException:
                 log.exception("Could not post Server B invite in ticket for %s", member.id)
-        if delivered:
-            self._reconcile_invite_sent[(member.guild.id, member.id)] = datetime.now(timezone.utc)
 
     async def _kick_from_community(self, cfg: dict, user_id: int, reason: str):
         community = self.bot.get_guild(cfg.get("server_b_id"))
@@ -149,13 +138,31 @@ class Mentorship(commands.Cog):
                 message = f"Your mentorship access has ended. Renew your access here: {renewal_url}"
             else:
                 message = "Your mentorship access has ended. Please contact the team to renew."
+            dm_sent = False
             try:
                 user = await self.bot.fetch_user(user_id)
                 await user.send(message)
+                dm_sent = True
             except discord.HTTPException:
-                # Never create a renewal ticket as a fallback. The member is still
-                # removed from Server B; a failed DM is recorded for staff visibility.
-                log.info("Renewal DM could not be delivered to %s; no renewal ticket created", user_id)
+                log.info("Renewal DM could not be delivered to %s", user_id)
+            if not dm_sent:
+                current_member = member or source.get_member(user_id)
+                if current_member:
+                    try:
+                        from .ticketing import create_private_ticket
+                        await create_private_ticket(
+                            source, current_member, cfg, "renewal",
+                            (sub or {}).get("email")
+                        )
+                    except (discord.HTTPException, ValueError):
+                        log.exception("Could not create renewal ticket for %s", user_id)
+                else:
+                    sales = source.get_channel(cfg.get("sales_channel_id"))
+                    if isinstance(sales, discord.TextChannel):
+                        await sales.send(
+                            f"Renewal DM failed and user {user_id} is no longer in Server A. "
+                            "Contact them through the verified support channel."
+                        )
             await database.deactivate_subscription(user_id, source.id)
             role = source.get_role(cfg.get("mentorship_role_id"))
             if role:
@@ -165,71 +172,6 @@ class Mentorship(commands.Cog):
                 )
         finally:
             self._offboarding.discard(key)
-
-    @tasks.loop(minutes=15)
-    async def access_reconciliation(self):
-        """Reconcile Server B membership against the live payment role in Server A."""
-        for source in list(self.bot.guilds):
-            try:
-                cfg = await database.get_config(source.id)
-                if not cfg or source.id != cfg.get("server_a_id"):
-                    continue
-                role = source.get_role(cfg.get("mentorship_role_id"))
-                community = self.bot.get_guild(cfg.get("server_b_id"))
-                if role is None or community is None:
-                    log.error("15-minute access check skipped: Server A role or Server B is unavailable (A=%s, B=%s)",
-                              source.id, cfg.get("server_b_id"))
-                    continue
-
-                # Fetch complete current membership rather than trusting a possibly stale cache.
-                source_members = [member async for member in source.fetch_members(limit=None)]
-                source_by_id = {member.id: member for member in source_members}
-                verified = {member.id: member for member in source_members if role in member.roles}
-                community_members = [member async for member in community.fetch_members(limit=None)]
-                community_ids = {member.id for member in community_members}
-
-                # Verified customers who have not accepted their invite get a fresh delivery
-                # at most once per 24 hours (the invite itself also expires after 24 hours).
-                now = datetime.now(timezone.utc)
-                for user_id, member in verified.items():
-                    if user_id in community_ids:
-                        self._reconcile_invite_sent.pop((source.id, user_id), None)
-                        continue
-                    last_sent = self._reconcile_invite_sent.get((source.id, user_id))
-                    if last_sent and now - last_sent < timedelta(hours=24):
-                        continue
-                    try:
-                        await self._grant_community_access(member, cfg,
-                                                           await database.get_subscription(user_id, source.id))
-                    except Exception:
-                        log.exception("15-minute check could not send access invite to %s", user_id)
-
-                # Anyone in Server B without the live verified role is removed.
-                for community_member in community_members:
-                    source_member = source_by_id.get(community_member.id)
-                    # Preserve Server B staff/unrelated accounts not present in Server A.
-                    if source_member is not None and role not in source_member.roles:
-                        try:
-                            await self._offboard(
-                                source, community_member.id, cfg,
-                                "15-minute access reconciliation: no active payment-verified role",
-                                member=source_member
-                            )
-                        except Exception:
-                            log.exception("15-minute check could not revoke access for %s",
-                                          community_member.id)
-                log.info("15-minute access check complete for Server A %s / Server B %s: %s verified, %s in community",
-                         source.id, community.id, len(verified), len(community_members))
-            except discord.Forbidden:
-                log.exception("15-minute access check lacks permission to list members or manage Server B")
-            except discord.HTTPException:
-                log.exception("Discord API failure during 15-minute access check for Server A %s", source.id)
-            except Exception:
-                log.exception("Unexpected failure during 15-minute access check for Server A %s", source.id)
-
-    @access_reconciliation.before_loop
-    async def before_access_reconciliation(self):
-        await self.bot.wait_until_ready()
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
@@ -241,6 +183,7 @@ class Mentorship(commands.Cog):
             return
         sub = await database.get_subscription(after.id, after.guild.id)
         if role in after.roles:
+            # A SuperProfile webhook marker identifies provider-driven role assignments.
             context = self._superprofile_assignments.pop((after.guild.id, after.id), None)
             if context:
                 sub = {**(sub or {}), "email": context.get("email") or (sub or {}).get("email")}
