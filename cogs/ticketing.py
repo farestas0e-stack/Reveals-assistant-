@@ -461,7 +461,7 @@ class Ticketing(commands.Cog):
             if count is None:
                 continue
             member = channel.guild.get_member(ticket["user_id"])
-            mention = member.mention if member else "there"
+            mention = member.mention if member else f"<@{ticket['user_id']}>"
             reminder = discord.Embed(
                 title=(f"Final purchase warning {count}/3" if count == 3 else f"Purchase warning {count}/3"),
                 description=(
