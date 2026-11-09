@@ -275,7 +275,7 @@ async def _auto_close_purchase_ticket(channel: discord.TextChannel, ticket: dict
             description=(
                 f"**Ticket:** #{channel.name}\n"
                 f"**Opened by:** {owner_label}\n"
-                "**Reason:** Six unanswered purchase reminders\n"
+                "**Reason:** Three unanswered purchase warnings\n"
                 f"**Messages captured:** {message_count}\n"
                 f"**Transcript:** {'Truncated to fit upload limits' if truncated else 'Complete'}"
             ),
@@ -288,7 +288,7 @@ async def _auto_close_purchase_ticket(channel: discord.TextChannel, ticket: dict
             file=discord.File(io.BytesIO(transcript), filename=f"ticket-{channel.id}-transcript.txt")
         )
         await database.close_ticket(channel.id)
-        await channel.delete(reason="Automatically closed after six unanswered purchase reminders")
+        await channel.delete(reason="Automatically closed after three unanswered purchase warnings")
         return True
     except (discord.HTTPException, OSError):
         log.exception("Automatic ticket closure failed for %s", channel.id)
@@ -300,7 +300,7 @@ class PurchaseReminderView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Delay next warning by 6 hours",
+        label="Delay next warning by 8 hours",
         style=discord.ButtonStyle.secondary,
         custom_id="reveals:purchase_reminder_delay"
     )
@@ -310,9 +310,9 @@ class PurchaseReminderView(discord.ui.View):
             return await interaction.response.send_message("This purchase ticket is no longer pending.", ephemeral=True)
         if interaction.user.id != ticket["user_id"]:
             return await interaction.response.send_message("Only the ticket owner can delay a reminder.", ephemeral=True)
-        if not await database.delay_ticket_reminder(interaction.channel_id, 6):
+        if not await database.delay_ticket_reminder(interaction.channel_id, 8):
             return await interaction.response.send_message("This ticket can no longer be delayed.", ephemeral=True)
-        await interaction.response.send_message("Next reminder delayed by 6 hours.", ephemeral=True)
+        await interaction.response.send_message("Next reminder delayed by 8 hours.", ephemeral=True)
 
     @discord.ui.button(
         label="Admin: extend by 24 hours",
@@ -452,7 +452,7 @@ class Ticketing(commands.Cog):
             channel = self.bot.get_channel(ticket["channel_id"])
             if not isinstance(channel, discord.TextChannel):
                 continue
-            if int(ticket.get("reminder_count") or 0) >= 6:
+            if int(ticket.get("reminder_count") or 0) >= 3:
                 if not await _auto_close_purchase_ticket(channel, ticket):
                     await database.retry_ticket_auto_close(channel.id)
                 continue
@@ -463,18 +463,24 @@ class Ticketing(commands.Cog):
             member = channel.guild.get_member(ticket["user_id"])
             mention = member.mention if member else "there"
             reminder = discord.Embed(
-                title=(f"Final purchase reminder {count}/6" if count == 6 else f"Purchase reminder {count}/6"),
+                title=(f"Final purchase warning {count}/3" if count == 3 else f"Purchase warning {count}/3"),
                 description=(
-                    f"{mention}, are you still interested in joining **The Reveals Circle**?\n\n"
-                    "Choose **Get membership link** in the ticket to continue, or close the ticket if you no longer want to purchase. "
-                    "This reminder will repeat every 6 hours while the ticket remains pending. "
-                    + ("This is the sixth reminder. The ticket will automatically close in 6 hours unless you delay it or an administrator extends it." if count == 6 else "After 6 reminders, the ticket will automatically close.")
+                    f"{mention}, are you still interested in joining The Reveals Circle?\n\n"
+                    "Choose Get membership link in this ticket to continue, or close the ticket if you no longer want to purchase. "
+                    "You will receive up to 3 warnings, one every 8 hours. "
+                    + ("This is your third warning. The ticket will automatically close in 8 hours unless you delay it or an administrator extends it." if count == 3 else "After the third warning, the ticket will automatically close.")
                 ),
                 color=discord.Color.orange()
             )
-            reminder.set_footer(text="You can delay the next reminder by 6 hours. Administrators can extend the ticket by 24 hours.")
             try:
-                await channel.send(embed=reminder, view=PurchaseReminderView())
+                await channel.send(
+                    content=(
+                        f"{mention} — **{'Final purchase warning' if count == 3 else 'Purchase warning'} {count}/3**\n\n"
+                        f"{reminder.description}"
+                    ),
+                    view=PurchaseReminderView(),
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False)
+                )
             except discord.HTTPException:
                 log.exception("Could not send purchase reminder in ticket %s", channel.id)
 
