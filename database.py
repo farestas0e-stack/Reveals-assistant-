@@ -152,7 +152,7 @@ async def add_ticket(channel_id: int, guild_id: int, user_id: int,
             INSERT OR REPLACE INTO tickets
             (channel_id,guild_id,user_id,ticket_type,submitted_email,created_at,
              approved_at,closed_at,tenure,evidence_message_id,approval_status,reminder_count,next_reminder_at)
-            VALUES(?,?,?,?,?,datetime('now'),NULL,NULL,NULL,NULL,'pending',0,CASE WHEN ?='purchase' THEN datetime('now','+6 hours') ELSE NULL END)
+            VALUES(?,?,?,?,?,datetime('now'),NULL,NULL,NULL,NULL,'pending',0,CASE WHEN ?='purchase' THEN datetime('now','+8 hours') ELSE NULL END)
         """, (channel_id, guild_id, user_id, ticket_type, email, ticket_type))
         await db.commit()
 
@@ -274,12 +274,12 @@ async def advance_ticket_reminder(channel_id: int) -> int | None:
         count = int(row[0]) + 1
         if count >= 6:
             await db.execute(
-                "UPDATE tickets SET reminder_count=?,next_reminder_at=datetime('now','+6 hours') WHERE channel_id=?",
+                "UPDATE tickets SET reminder_count=?,next_reminder_at=datetime('now','+8 hours') WHERE channel_id=?",
                 (count, channel_id)
             )
         else:
             await db.execute("""
-                UPDATE tickets SET reminder_count=?,next_reminder_at=datetime('now','+6 hours')
+                UPDATE tickets SET reminder_count=?,next_reminder_at=datetime('now','+8 hours')
                 WHERE channel_id=?
             """, (count, channel_id))
         await db.commit()
