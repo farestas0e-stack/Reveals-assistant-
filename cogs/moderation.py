@@ -28,9 +28,9 @@ class ModerationAudit(commands.Cog):
     @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.describe(member="Member whose mentions are restricted", role="Role allowed to mention this member")
     async def mention_access_add(self, interaction: discord.Interaction, member: discord.Member, role: discord.Role):
-        if interaction.guild is None or role.is_default or role >= interaction.guild.me.top_role:
+        if interaction.guild is None or role.is_default or role.guild.id != interaction.guild.id:
             return await interaction.response.send_message(
-                "Choose a normal role below the bot's highest role, inside this server.", ephemeral=True
+                "Choose a normal role from this server.", ephemeral=True
             )
         await database.add_mention_allowed_role(interaction.guild.id, member.id, role.id)
         await interaction.response.send_message(
