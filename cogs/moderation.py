@@ -62,15 +62,30 @@ class ModerationAudit(commands.Cog):
             return
         if message.author.guild_permissions.administrator or message.author.guild_permissions.manage_guild:
             return
-        # Refresh the sender's member record so role changes are not missed
-        # because the gateway member cache is stale.
-        try:
-            sender = await message.guild.fetch_member(message.author.id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            sender = message.author
-        author_role_ids = {role.id for role in getattr(sender, "roles", [])}
+        # First trust the live Member object attached to the gateway message.
+        # A sender needs ANY ONE of the configured roles for EVERY protected
+        # member they mention. This is an unlimited permission, not a counter.
+        sender_role_ids = {
+            role.id for role in getattr(message.author, "roles", [])
+        }
+
+        # If the gateway member cache has not caught a recent role assignment,
+        # refresh once from Discord before taking any moderation action.
+        needs_refresh = any(
+            sender_role_ids.isdisjoint(restrictions[target.id])
+            for target in protected_ids
+        )
+        if needs_refresh:
+            try:
+                sender = await message.guild.fetch_member(message.author.id)
+                sender_role_ids = {role.id for role in sender.roles}
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                # Fail open if Discord cannot verify the member; avoid deleting
+                # a legitimate message because a role lookup temporarily failed.
+                return
+
         for target in protected_ids:
-            if author_role_ids.isdisjoint(restrictions[target.id]):
+            if sender_role_ids.isdisjoint(restrictions[target.id]):
                 try:
                     await message.delete()
                 except discord.Forbidden:
