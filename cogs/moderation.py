@@ -87,7 +87,7 @@ class ModerationAudit(commands.Cog):
                     return
                 try:
                     await message.channel.send(
-                        f"{message.author.mention}, you don't have permission to mention {target.mention}.",
+                        f"{message.author.mention}, don't tag him.",
                         allowed_mentions=discord.AllowedMentions(users=True)
                     )
                 except discord.HTTPException:
