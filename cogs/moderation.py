@@ -66,21 +66,23 @@ class ModerationAudit(commands.Cog):
         if message.author.guild_permissions.administrator or message.author.guild_permissions.manage_guild:
             return
 
-        # Any one configured role grants unlimited permission for that target.
-        sender_role_ids = {role.id for role in getattr(message.author, "roles", [])}
-        if any(
-            sender_role_ids.isdisjoint(restrictions[target.id])
-            for target in protected_targets
-        ):
-            try:
-                sender = await message.guild.fetch_member(message.author.id)
-                sender_role_ids = {role.id for role in sender.roles}
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                # Fail open if Discord cannot verify the member's current roles.
-                return
+        # Refresh roles from Discord on every protected-member mention.
+        # Combine fresh and cached IDs so a stale gateway cache cannot reject
+        # a role that the member actually holds. Any one allowed role is enough.
+        sender_role_ids = {
+            int(role.id) for role in getattr(message.author, "roles", [])
+        }
+        try:
+            sender = await message.guild.fetch_member(message.author.id)
+            sender_role_ids.update(int(role.id) for role in sender.roles)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            # Fail open if Discord cannot verify the member's current roles.
+            return
 
         for target in protected_targets:
-            if sender_role_ids.isdisjoint(restrictions[target.id]):
+            allowed_role_ids = {int(role_id) for role_id in restrictions[target.id]}
+            if not sender_role_ids.isdisjoint(allowed_role_ids):
+                continue
                 try:
                     await message.delete()
                 except (discord.Forbidden, discord.HTTPException):
