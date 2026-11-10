@@ -62,7 +62,13 @@ class ModerationAudit(commands.Cog):
             return
         if message.author.guild_permissions.administrator or message.author.guild_permissions.manage_guild:
             return
-        author_role_ids = {role.id for role in getattr(message.author, "roles", [])}
+        # Refresh the sender's member record so role changes are not missed
+        # because the gateway member cache is stale.
+        try:
+            sender = await message.guild.fetch_member(message.author.id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            sender = message.author
+        author_role_ids = {role.id for role in getattr(sender, "roles", [])}
         for target in protected_ids:
             if author_role_ids.isdisjoint(restrictions[target.id]):
                 try:
