@@ -1,6 +1,7 @@
 import asyncio
 import discord
-from discord.ext import commands\nfrom discord import app_commands
+from discord.ext import commands
+from discord import app_commands
 import database
 
 class ModerationAudit(commands.Cog):
@@ -91,7 +92,7 @@ class ModerationAudit(commands.Cog):
         for user_id, role_ids in restrictions.items():
             roles = ", ".join(f"<@&{rid}>" for rid in sorted(role_ids))
             lines.append(f"<@{user_id}> — allowed roles: {roles}")
-        await interaction.response.send_message("\\n".join(lines), ephemeral=True)
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild, user):
