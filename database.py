@@ -15,6 +15,10 @@ CREATE TABLE IF NOT EXISTS guild_config (
  panel_channel_id INTEGER, panel_message_id INTEGER,
  monthly_url TEXT, staff_role_id INTEGER
 );
+CREATE TABLE IF NOT EXISTS protected_member_mention_roles (
+ guild_id INTEGER NOT NULL, target_user_id INTEGER NOT NULL, role_id INTEGER NOT NULL,
+ PRIMARY KEY(guild_id, target_user_id, role_id)
+);
 CREATE TABLE IF NOT EXISTS subscriptions (
  user_id INTEGER NOT NULL, guild_a_id INTEGER NOT NULL, started_at TEXT NOT NULL,
  expires_at TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
@@ -347,3 +351,40 @@ async def mark_ticket_access_granted(channel_id: int, email: str | None = None) 
             WHERE channel_id=?
         """, (email, channel_id))
         await db.commit()
+
+
+async def add_mention_allowed_role(guild_id: int, target_user_id: int, role_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT OR IGNORE INTO protected_member_mention_roles
+                (guild_id, target_user_id, role_id) VALUES(?,?,?)
+        """, (guild_id, target_user_id, role_id))
+        await db.commit()
+
+
+async def remove_mention_allowed_role(guild_id: int, target_user_id: int, role_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            DELETE FROM protected_member_mention_roles
+            WHERE guild_id=? AND target_user_id=? AND role_id=?
+        """, (guild_id, target_user_id, role_id))
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def get_protected_member_mention_roles(guild_id: int, target_user_id: int | None = None) -> dict[int, set[int]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        if target_user_id is None:
+            rows = await (await db.execute("""
+                SELECT target_user_id, role_id FROM protected_member_mention_roles
+                WHERE guild_id=? ORDER BY target_user_id, role_id
+            """, (guild_id,))).fetchall()
+        else:
+            rows = await (await db.execute("""
+                SELECT target_user_id, role_id FROM protected_member_mention_roles
+                WHERE guild_id=? AND target_user_id=? ORDER BY role_id
+            """, (guild_id, target_user_id))).fetchall()
+    result: dict[int, set[int]] = {}
+    for user_id, role_id in rows:
+        result.setdefault(int(user_id), set()).add(int(role_id))
+    return result
