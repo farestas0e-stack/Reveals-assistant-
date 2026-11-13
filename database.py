@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS attribution_responses (
 );
 CREATE TABLE IF NOT EXISTS community_invites (
  invite_code TEXT PRIMARY KEY, guild_a_id INTEGER NOT NULL, guild_b_id INTEGER NOT NULL,
- user_id INTEGER NOT NULL, ticket_channel_id INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+ user_id INTEGER NOT NULL, ticket_channel_id INTEGER, email TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
  expires_at TEXT NOT NULL, max_uses INTEGER NOT NULL DEFAULT 1, used_at TEXT,
  status TEXT NOT NULL DEFAULT 'pending'
 );
@@ -66,6 +66,7 @@ async def init_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(SCHEMA)
         migrations = {
+            "community_invites": {"email": "TEXT"},
             "guild_config": {
                 "monthly_url": "TEXT", "staff_role_id": "INTEGER",
                 "role_assigned_channel_id": "INTEGER", "role_revoked_channel_id": "INTEGER",
@@ -442,13 +443,13 @@ async def get_attribution(guild_id: int, user_id: int) -> str | None:
         return str(row[0]) if row else None
 
 async def add_community_invite(code: str, guild_a_id: int, guild_b_id: int, user_id: int,
-                               ticket_channel_id: int | None, expires_at: str) -> None:
+                               ticket_channel_id: int | None, expires_at: str, email: str | None = None) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             INSERT OR REPLACE INTO community_invites
-            (invite_code,guild_a_id,guild_b_id,user_id,ticket_channel_id,expires_at,max_uses,status)
-            VALUES(?,?,?,?,?,?,1,'pending')
-        """, (code,guild_a_id,guild_b_id,user_id,ticket_channel_id,expires_at))
+            (invite_code,guild_a_id,guild_b_id,user_id,ticket_channel_id,email,expires_at,max_uses,status)
+            VALUES(?,?,?,?,?,?,?,1,'pending')
+        """, (code,guild_a_id,guild_b_id,user_id,ticket_channel_id,email,expires_at))
         await db.commit()
 
 async def get_pending_invite_by_code(code: str) -> dict[str, Any] | None:
