@@ -24,8 +24,6 @@ class Config(commands.Cog):
         renewal_category_id="Renewal ticket category ID in Server A",
         renewal_url="Single membership / renewal checkout URL",
         staff_role_id="Optional staff role ID in Server A",
-        server_c_id="Optional moderation log server ID",
-        log_channel_id="Optional moderation log channel ID in Server C",
         ticket_log_channel_id="Optional ticket transcript and closure log channel ID in Server A"
     )
     async def setup(
@@ -34,8 +32,7 @@ class Config(commands.Cog):
         role_assigned_channel_id: str, role_revoked_channel_id: str,
         ticket_category_id: str, renewal_category_id: str,
         renewal_url: str,
-        staff_role_id: str | None = None, server_c_id: str | None = None,
-        log_channel_id: str | None = None, ticket_log_channel_id: str | None = None
+        staff_role_id: str | None = None, ticket_log_channel_id: str | None = None
     ):
         guild = interaction.guild
         if guild is None:
@@ -49,8 +46,6 @@ class Config(commands.Cog):
                 )
             ]
             staff_id = int(staff_role_id) if staff_role_id else None
-            c_id = int(server_c_id) if server_c_id else None
-            log_id = int(log_channel_id) if log_channel_id else None
             ticket_log_id = int(ticket_log_channel_id) if ticket_log_channel_id else None
         except ValueError:
             return await interaction.response.send_message("Every supplied ID must be numeric.", ephemeral=True)
@@ -98,26 +93,14 @@ class Config(commands.Cog):
             return await interaction.response.send_message(
                 "The bot needs Kick Members and Create Invite permissions in Server B.", ephemeral=True
             )
-        if c_id is not None:
-            audit_guild = self.bot.get_guild(c_id)
-            audit_channel = audit_guild.get_channel(log_id) if audit_guild and log_id else None
-            if not isinstance(audit_channel, discord.TextChannel):
-                return await interaction.response.send_message(
-                    "Server C and its text log channel must both be valid.", ephemeral=True
-                )
-        elif log_id is not None:
-            return await interaction.response.send_message(
-                "Provide Server C ID when configuring a Server C log channel.", ephemeral=True
-            )
-
         await database.set_config(
-            guild.id, server_a_id=guild.id, server_b_id=b_id, server_c_id=c_id,
+            guild.id, server_a_id=guild.id, server_b_id=b_id,
             mentorship_role_id=role_id, sales_channel_id=sales_id,
             role_assigned_channel_id=assigned_id, role_revoked_channel_id=revoked_id,
             ticket_category_id=ticket_cat_id, renewal_category_id=renewal_cat_id,
             monthly_url=renewal_url.strip(), renewal_url=renewal_url.strip(),
             staff_role_id=staff_id,
-            log_channel_id=log_id, ticket_log_channel_id=ticket_log_id
+            ticket_log_channel_id=ticket_log_id
         )
         await interaction.response.send_message(
             "Configuration saved. Membership role assignment triggers automatic payment verification and Server B access.",
@@ -158,7 +141,6 @@ class Config(commands.Cog):
         embed.add_field(name="Membership / renewal link", value="Configured" if (cfg.get("renewal_url") or cfg.get("monthly_url")) else "Missing", inline=True)
         embed.add_field(name="Staff role", value=f"<@&{cfg['staff_role_id']}>" if cfg.get("staff_role_id") else "Not set", inline=True)
         embed.add_field(name="Ticket logs / transcripts", value=f"<#{cfg['ticket_log_channel_id']}>" if cfg.get("ticket_log_channel_id") else "Not set — configure in /setup", inline=True)
-        embed.add_field(name="Server C logs", value=f"Server {cfg.get('server_c_id')} / <#{cfg.get('log_channel_id')}>" if cfg.get("server_c_id") and cfg.get("log_channel_id") else "Not set", inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 async def setup(bot):
