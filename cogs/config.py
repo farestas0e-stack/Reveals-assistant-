@@ -22,7 +22,8 @@ class Config(commands.Cog):
         role_revoked_channel_id="Role revoked log channel ID in Server A",
         ticket_category_id="Purchase ticket category ID in Server A",
         renewal_category_id="Renewal ticket category ID in Server A",
-        renewal_url="Single membership / renewal checkout URL",
+        first_purchase_url="Checkout URL for first-time purchases",
+        renewal_url="Checkout URL for renewals",
         staff_role_id="Optional staff role ID in Server A",
         ticket_log_channel_id="Optional ticket transcript and closure log channel ID in Server A",
         trusted_provider_manager_role_id="Role allowed to confirm provider-approved payouts",
@@ -34,7 +35,7 @@ class Config(commands.Cog):
         mentorship_role_id: str, sales_channel_id: str,
         role_assigned_channel_id: str, role_revoked_channel_id: str,
         ticket_category_id: str, renewal_category_id: str,
-        renewal_url: str,
+        first_purchase_url: str, renewal_url: str,
         staff_role_id: str | None = None, ticket_log_channel_id: str | None = None,
         trusted_provider_manager_role_id: str | None = None, sales_staff_role_id: str | None = None,
         community_mentorship_role_id: str | None = None
@@ -58,9 +59,9 @@ class Config(commands.Cog):
         except ValueError:
             return await interaction.response.send_message("Every supplied ID must be numeric.", ephemeral=True)
 
-        if not valid_url(renewal_url):
+        if not valid_url(first_purchase_url) or not valid_url(renewal_url):
             return await interaction.response.send_message(
-                "The membership / renewal link must be a valid http:// or https:// URL.", ephemeral=True
+                "Both first-time purchase and renewal links must be valid http:// or https:// URLs.", ephemeral=True
             )
         role = guild.get_role(role_id)
         sales = guild.get_channel(sales_id)
@@ -121,7 +122,8 @@ class Config(commands.Cog):
             mentorship_role_id=role_id, sales_channel_id=sales_id,
             role_assigned_channel_id=assigned_id, role_revoked_channel_id=revoked_id,
             ticket_category_id=ticket_cat_id, renewal_category_id=renewal_cat_id,
-            monthly_url=renewal_url.strip(), renewal_url=renewal_url.strip(),
+            first_purchase_url=first_purchase_url.strip(),
+            renewal_url=renewal_url.strip(),
             staff_role_id=staff_id,
             ticket_log_channel_id=ticket_log_id,
             trusted_provider_manager_role_id=provider_manager_id,
@@ -164,7 +166,8 @@ class Config(commands.Cog):
         ):
             value = f"<#{cfg[key]}>" if cfg.get(key) else "Missing"
             embed.add_field(name=label, value=value, inline=True)
-        embed.add_field(name="Membership / renewal link", value="Configured" if (cfg.get("renewal_url") or cfg.get("monthly_url")) else "Missing", inline=True)
+        embed.add_field(name="First-time purchase link", value="Configured" if cfg.get("first_purchase_url") else "Missing", inline=True)
+        embed.add_field(name="Renewal link", value="Configured" if cfg.get("renewal_url") else "Missing", inline=True)
         embed.add_field(name="Trusted Provider Manager", value=f"<@&{cfg['trusted_provider_manager_role_id']}>" if cfg.get("trusted_provider_manager_role_id") else "Not set", inline=True)
         embed.add_field(name="Sales Staff", value=f"<@&{cfg['sales_staff_role_id']}>" if cfg.get("sales_staff_role_id") else "Not set", inline=True)
         embed.add_field(name="Server B mentorship role", value=f"<@&{cfg['community_mentorship_role_id']}>" if cfg.get("community_mentorship_role_id") else "Not set", inline=True)
