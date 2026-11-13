@@ -74,21 +74,22 @@ class AttributionView(discord.ui.View):
 
     async def _choose(self, interaction: discord.Interaction, source: str):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            return await interaction.response.send_message("Use this in your private purchase ticket.", ephemeral=True)
+            return await interaction.followup.send("Use this in your private purchase ticket.", ephemeral=True)
         ticket = await database.get_ticket(interaction.channel_id)
         if not ticket or ticket["user_id"] != interaction.user.id:
-            return await interaction.response.send_message("Only the ticket owner can submit this answer.", ephemeral=True)
+            return await interaction.followup.send("Only the ticket owner can submit this answer.", ephemeral=True)
         cfg = await database.get_config(ticket["guild_id"])
         if not cfg or not cfg.get("server_b_id"):
-            return await interaction.response.send_message("Server B is not configured. Contact staff.", ephemeral=True)
+            return await interaction.followup.send("Server B is not configured. Contact staff.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         await database.save_attribution(ticket["guild_id"], interaction.user.id, interaction.channel_id, source)
         community = interaction.client.get_guild(cfg["server_b_id"])
         if community is None:
-            return await interaction.response.send_message("Server B is unavailable. Staff have been notified.", ephemeral=True)
+            return await interaction.followup.send("Server B is unavailable. Staff have been notified.", ephemeral=True)
         invite_channel = next((ch for ch in community.text_channels
             if community.me and ch.permissions_for(community.me).create_instant_invite), None)
         if invite_channel is None:
-            return await interaction.response.send_message("The bot cannot create an invitation right now. Contact staff.", ephemeral=True)
+            return await interaction.followup.send("The bot cannot create an invitation right now. Contact staff.", ephemeral=True)
         try:
             invite = None
             existing_records = await database.active_invites_for_user(ticket["guild_id"], interaction.user.id)
@@ -108,7 +109,7 @@ class AttributionView(discord.ui.View):
                 )
         except (discord.HTTPException, ValueError):
             log.exception("Could not create one-use community invite for %s", interaction.user.id)
-            return await interaction.response.send_message("Invitation creation failed. Staff have been notified.", ephemeral=True)
+            return await interaction.followup.send("Invitation creation failed. Staff have been notified.", ephemeral=True)
 
         message = (
             f"Your mentorship access is approved. Join Server B within 24 hours using this "
@@ -123,7 +124,7 @@ class AttributionView(discord.ui.View):
                 await interaction.channel.send(f"{interaction.user.mention} {message}")
             except discord.HTTPException:
                 log.exception("Could not deliver invite to user %s", interaction.user.id)
-                return await interaction.response.send_message(
+                return await interaction.followup.send(
                     "The invite was created, but neither DM nor ticket delivery worked. Contact staff before requesting another invite.",
                     ephemeral=True
                 )
@@ -132,7 +133,7 @@ class AttributionView(discord.ui.View):
             "invite_created", interaction.client.user.id if interaction.client.user else None,
             f"Attribution={source}; delivery={delivered_by}; invite expires in 24 hours; one use"
         )
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Recorded: **{source.replace('_', ' ').title()}**. Your invitation was sent by {delivered_by}.",
             ephemeral=True
         )
