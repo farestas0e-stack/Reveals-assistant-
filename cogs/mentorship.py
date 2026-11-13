@@ -47,19 +47,25 @@ async def _send_log(guild: discord.Guild, cfg: dict, title: str, member_id: int,
                     email: str | None, detail: str, color: discord.Color):
     if guild is None:
         return
-    channel_id = cfg.get("sales_channel_id")
-    channel = guild.get_channel(channel_id) if channel_id else None
-    if not isinstance(channel, discord.TextChannel):
-        return
+    channel_ids = [cfg.get("sales_channel_id")]
+    lowered = title.casefold()
+    if any(word in lowered for word in ("assigned", "approved", "access granted")):
+        channel_ids.append(cfg.get("role_assigned_channel_id"))
+    if any(word in lowered for word in ("revoked", "removed", "kicked")):
+        channel_ids.append(cfg.get("role_revoked_channel_id"))
     embed = discord.Embed(title=title, color=color, timestamp=discord.utils.utcnow())
     embed.add_field(name="Discord user", value=f"<@{member_id}> ({member_id})", inline=False)
     embed.add_field(name="Payment email", value=email or "Not recorded", inline=True)
     embed.add_field(name="Purchase tenure", value="Provider-confirmed; role-based access", inline=True)
     embed.add_field(name="Details", value=detail[:1024], inline=False)
-    try:
-        await channel.send(embed=embed)
-    except discord.HTTPException:
-        log.exception("Could not send membership event log")
+    for channel_id in dict.fromkeys(channel_ids):
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if not isinstance(channel, discord.TextChannel):
+            continue
+        try:
+            await channel.send(embed=embed)
+        except discord.HTTPException:
+            log.exception("Could not send membership event log to channel %s", channel_id)
 
 
 class AttributionView(discord.ui.View):
@@ -308,8 +314,10 @@ class Mentorship(commands.Cog):
             )
             embed.add_field(name="Verified by", value=actor_label, inline=False)
             await ticket.send(embed=embed, view=AttributionView())
+            ticket_record = await database.get_ticket(ticket.id)
+            buyer_email = (sub or {}).get("email") or (ticket_record or {}).get("submitted_email")
             await _send_log(after.guild, cfg, "Approved payout role assigned", after.id,
-                            (sub or {}).get("email"), f"Verified by: {actor_label}", discord.Color.green())
+                            buyer_email, f"Verified by: {actor_label}", discord.Color.green())
         else:
             await self._offboard(after.guild, after.id, cfg,
                                  "Mentorship role removed in Server A", member=after)
