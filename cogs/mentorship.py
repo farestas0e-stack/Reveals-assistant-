@@ -164,7 +164,7 @@ class Mentorship(commands.Cog):
 
     async def _refresh_invite_cache(self):
         for guild in self.bot.guilds:
-            cfg = await database.get_config(guild.id)
+            cfg = await database.get_config_by_server_b_id(guild.id)
             if not cfg or guild.id != cfg.get("server_b_id"):
                 continue
             try:
@@ -309,7 +309,7 @@ class Mentorship(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        cfg = await database.get_config(member.guild.id)
+        cfg = await database.get_config_by_server_b_id(member.guild.id)
         if not cfg or member.guild.id != cfg.get("server_b_id"):
             return
         try:
