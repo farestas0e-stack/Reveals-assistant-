@@ -22,17 +22,23 @@ class Config(commands.Cog):
         role_revoked_channel_id="Role revoked log channel ID in Server A",
         ticket_category_id="Purchase ticket category ID in Server A",
         renewal_category_id="Renewal ticket category ID in Server A",
-        renewal_url="Single membership / renewal checkout URL",
+        first_purchase_url="Checkout URL for first-time purchases",
+        renewal_url="Checkout URL for renewals",
         staff_role_id="Optional staff role ID in Server A",
-        ticket_log_channel_id="Optional ticket transcript and closure log channel ID in Server A"
+        ticket_log_channel_id="Optional ticket transcript and closure log channel ID in Server A",
+        trusted_provider_manager_role_id="Role allowed to confirm provider-approved payouts",
+        sales_staff_role_id="Sales staff role allowed to confirm approved payouts",
+        community_mentorship_role_id="Mentorship access role in Server B"
     )
     async def setup(
         self, interaction: discord.Interaction, server_b_id: str,
         mentorship_role_id: str, sales_channel_id: str,
         role_assigned_channel_id: str, role_revoked_channel_id: str,
         ticket_category_id: str, renewal_category_id: str,
-        renewal_url: str,
-        staff_role_id: str | None = None, ticket_log_channel_id: str | None = None
+        first_purchase_url: str, renewal_url: str,
+        staff_role_id: str | None = None, ticket_log_channel_id: str | None = None,
+        trusted_provider_manager_role_id: str | None = None, sales_staff_role_id: str | None = None,
+        community_mentorship_role_id: str | None = None
     ):
         guild = interaction.guild
         if guild is None:
@@ -47,12 +53,15 @@ class Config(commands.Cog):
             ]
             staff_id = int(staff_role_id) if staff_role_id else None
             ticket_log_id = int(ticket_log_channel_id) if ticket_log_channel_id else None
+            provider_manager_id = int(trusted_provider_manager_role_id) if trusted_provider_manager_role_id else None
+            sales_staff_id = int(sales_staff_role_id) if sales_staff_role_id else None
+            community_role_id = int(community_mentorship_role_id) if community_mentorship_role_id else None
         except ValueError:
             return await interaction.response.send_message("Every supplied ID must be numeric.", ephemeral=True)
 
-        if not valid_url(renewal_url):
+        if not valid_url(first_purchase_url) or not valid_url(renewal_url):
             return await interaction.response.send_message(
-                "The membership / renewal link must be a valid http:// or https:// URL.", ephemeral=True
+                "Both first-time purchase and renewal links must be valid http:// or https:// URLs.", ephemeral=True
             )
         role = guild.get_role(role_id)
         sales = guild.get_channel(sales_id)
@@ -76,31 +85,50 @@ class Config(commands.Cog):
             return await interaction.response.send_message("Ticket log channel ID must identify a text channel in Server A.", ephemeral=True)
         if staff_id and guild.get_role(staff_id) is None:
             return await interaction.response.send_message("Staff role ID is invalid.", ephemeral=True)
+        if provider_manager_id and guild.get_role(provider_manager_id) is None:
+            return await interaction.response.send_message("Trusted Provider Manager role ID is invalid.", ephemeral=True)
+        if sales_staff_id and guild.get_role(sales_staff_id) is None:
+            return await interaction.response.send_message("Sales Staff role ID is invalid.", ephemeral=True)
+        if not provider_manager_id or not sales_staff_id:
+            return await interaction.response.send_message("Configure both Trusted Provider Manager and Sales Staff roles.", ephemeral=True)
+        if not community_role_id:
+            return await interaction.response.send_message("Configure the Server B mentorship role.", ephemeral=True)
         if guild.me is None:
             return await interaction.response.send_message("Bot member cache is unavailable; retry in a moment.", ephemeral=True)
         if role >= guild.me.top_role:
             return await interaction.response.send_message(
                 "Move the bot's highest role above the mentorship role before setup.", ephemeral=True
             )
-        if not guild.me.guild_permissions.manage_roles or not guild.me.guild_permissions.manage_channels:
+        if not guild.me.guild_permissions.manage_roles or not guild.me.guild_permissions.manage_channels or not guild.me.guild_permissions.view_audit_log:
             return await interaction.response.send_message(
-                "The bot needs Manage Roles and Manage Channels in Server A.", ephemeral=True
+                "The bot needs Manage Roles, Manage Channels, and View Audit Log in Server A to verify trusted role assignments.", ephemeral=True
             )
         community = self.bot.get_guild(b_id)
         if community is None or community.me is None:
             return await interaction.response.send_message("Invite the bot to Server B first.", ephemeral=True)
-        if not community.me.guild_permissions.kick_members or not community.me.guild_permissions.create_instant_invite:
+        if community_role_id and community.get_role(community_role_id) is None:
+            return await interaction.response.send_message("Server B mentorship role ID is invalid.", ephemeral=True)
+        if community_role_id and community.me.top_role <= community.get_role(community_role_id):
+            return await interaction.response.send_message("Move the bot role above the Server B mentorship role.", ephemeral=True)
+        if (not community.me.guild_permissions.kick_members or
+                not community.me.guild_permissions.create_instant_invite or
+                not community.me.guild_permissions.manage_guild or
+                (community_role_id and not community.me.guild_permissions.manage_roles)):
             return await interaction.response.send_message(
-                "The bot needs Kick Members and Create Invite permissions in Server B.", ephemeral=True
+                "The bot needs Kick Members, Create Invite, Manage Server (to track invite use), and Manage Roles in Server B.", ephemeral=True
             )
         await database.set_config(
             guild.id, server_a_id=guild.id, server_b_id=b_id,
             mentorship_role_id=role_id, sales_channel_id=sales_id,
             role_assigned_channel_id=assigned_id, role_revoked_channel_id=revoked_id,
             ticket_category_id=ticket_cat_id, renewal_category_id=renewal_cat_id,
-            monthly_url=renewal_url.strip(), renewal_url=renewal_url.strip(),
+            first_purchase_url=first_purchase_url.strip(),
+            renewal_url=renewal_url.strip(),
             staff_role_id=staff_id,
-            ticket_log_channel_id=ticket_log_id
+            ticket_log_channel_id=ticket_log_id,
+            trusted_provider_manager_role_id=provider_manager_id,
+            sales_staff_role_id=sales_staff_id,
+            community_mentorship_role_id=community_role_id
         )
         await interaction.response.send_message(
             "Configuration saved. Membership role assignment triggers automatic payment verification and Server B access.",
@@ -138,7 +166,11 @@ class Config(commands.Cog):
         ):
             value = f"<#{cfg[key]}>" if cfg.get(key) else "Missing"
             embed.add_field(name=label, value=value, inline=True)
-        embed.add_field(name="Membership / renewal link", value="Configured" if (cfg.get("renewal_url") or cfg.get("monthly_url")) else "Missing", inline=True)
+        embed.add_field(name="First-time purchase link", value="Configured" if cfg.get("first_purchase_url") else "Missing", inline=True)
+        embed.add_field(name="Renewal link", value="Configured" if cfg.get("renewal_url") else "Missing", inline=True)
+        embed.add_field(name="Trusted Provider Manager", value=f"<@&{cfg['trusted_provider_manager_role_id']}>" if cfg.get("trusted_provider_manager_role_id") else "Not set", inline=True)
+        embed.add_field(name="Sales Staff", value=f"<@&{cfg['sales_staff_role_id']}>" if cfg.get("sales_staff_role_id") else "Not set", inline=True)
+        embed.add_field(name="Server B mentorship role", value=f"<@&{cfg['community_mentorship_role_id']}>" if cfg.get("community_mentorship_role_id") else "Not set", inline=True)
         embed.add_field(name="Staff role", value=f"<@&{cfg['staff_role_id']}>" if cfg.get("staff_role_id") else "Not set", inline=True)
         embed.add_field(name="Ticket logs / transcripts", value=f"<#{cfg['ticket_log_channel_id']}>" if cfg.get("ticket_log_channel_id") else "Not set — configure in /setup", inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)

@@ -1,115 +1,197 @@
-import logging
 import asyncio
-from datetime import datetime, timezone
+import logging
+from datetime import datetime, timedelta, timezone
+
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
+
 import database
 
 log = logging.getLogger("reveals-assistant.mentorship")
+
+
+async def _find_role_assigner(guild: discord.Guild, member_id: int, role_id: int):
+    # Discord audit-log entries can arrive shortly after the member update event.
+    await asyncio.sleep(1)
+    try:
+        async for entry in guild.audit_logs(limit=20, action=discord.AuditLogAction.member_role_update):
+            if getattr(entry.target, "id", None) != member_id or not entry.user:
+                continue
+            if (discord.utils.utcnow() - entry.created_at).total_seconds() > 90:
+                continue
+            before_roles = {r.id for r in (getattr(entry.before, "roles", None) or [])}
+            after_roles = {r.id for r in (getattr(entry.after, "roles", None) or [])}
+            if role_id in after_roles and role_id not in before_roles:
+                return entry.user
+    except discord.Forbidden:
+        log.error("Missing View Audit Log permission in guild %s; role assignment will not be trusted", guild.id)
+    except discord.HTTPException:
+        log.exception("Could not inspect role assignment audit log in guild %s", guild.id)
+    return None
+
+
+def _is_trusted_assigner(actor: discord.abc.User, cfg: dict, guild: discord.Guild) -> bool:
+    if not isinstance(actor, discord.Member):
+        actor = guild.get_member(actor.id)
+    if actor is None:
+        return False
+    trusted_ids = {
+        cfg.get("trusted_provider_manager_role_id"),
+        cfg.get("sales_staff_role_id"),
+    }
+    trusted_ids.discard(None)
+    return any(role.id in trusted_ids for role in actor.roles)
+
+
+async def _send_log(guild: discord.Guild, cfg: dict, title: str, member_id: int,
+                    email: str | None, detail: str, color: discord.Color):
+    if guild is None:
+        return
+    channel_ids = [cfg.get("sales_channel_id")]
+    lowered = title.casefold()
+    if any(word in lowered for word in ("assigned", "approved", "access granted")):
+        channel_ids.append(cfg.get("role_assigned_channel_id"))
+    if any(word in lowered for word in ("revoked", "removed", "kicked")):
+        channel_ids.append(cfg.get("role_revoked_channel_id"))
+    embed = discord.Embed(title=title, color=color, timestamp=discord.utils.utcnow())
+    embed.add_field(name="Discord user", value=f"<@{member_id}> ({member_id})", inline=False)
+    embed.add_field(name="Payment email", value=email or "Not recorded", inline=True)
+    embed.add_field(name="Purchase tenure", value="Provider-confirmed; role-based access", inline=True)
+    embed.add_field(name="Details", value=detail[:1024], inline=False)
+    for channel_id in dict.fromkeys(channel_ids):
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if not isinstance(channel, discord.TextChannel):
+            continue
+        try:
+            await channel.send(embed=embed)
+        except discord.HTTPException:
+            log.exception("Could not send membership event log to channel %s", channel_id)
+
+
+class AttributionView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def _choose(self, interaction: discord.Interaction, source: str):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return await interaction.followup.send("Use this in your private purchase ticket.", ephemeral=True)
+        ticket = await database.get_ticket(interaction.channel_id)
+        if not ticket or ticket["user_id"] != interaction.user.id:
+            return await interaction.followup.send("Only the ticket owner can submit this answer.", ephemeral=True)
+        cfg = await database.get_config(ticket["guild_id"])
+        if not cfg or not cfg.get("server_b_id"):
+            return await interaction.followup.send("Server B is not configured. Contact staff.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await database.save_attribution(ticket["guild_id"], interaction.user.id, interaction.channel_id, source)
+        community = interaction.client.get_guild(cfg["server_b_id"])
+        if community is None:
+            return await interaction.followup.send("Server B is unavailable. Staff have been notified.", ephemeral=True)
+        invite_channel = next((ch for ch in community.text_channels
+            if community.me and ch.permissions_for(community.me).create_instant_invite), None)
+        if invite_channel is None:
+            return await interaction.followup.send("The bot cannot create an invitation right now. Contact staff.", ephemeral=True)
+        try:
+            invite = None
+            existing_records = await database.active_invites_for_user(ticket["guild_id"], interaction.user.id)
+            if existing_records:
+                available_invites = await community.invites()
+                invite = next((item for item in available_invites
+                               if item.code == existing_records[0]["invite_code"]), None)
+            if invite is None:
+                invite = await invite_channel.create_invite(
+                    max_age=86400, max_uses=1, unique=True,
+                    reason=f"Approved mentorship access for Discord user {interaction.user.id}"
+                )
+                expires_at = (discord.utils.utcnow() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+                await database.add_community_invite(
+                    invite.code, ticket["guild_id"], community.id, interaction.user.id,
+                    interaction.channel_id, expires_at, ticket.get("submitted_email")
+                )
+        except (discord.HTTPException, ValueError):
+            log.exception("Could not create one-use community invite for %s", interaction.user.id)
+            return await interaction.followup.send("Invitation creation failed. Staff have been notified.", ephemeral=True)
+
+        message = (
+            f"Your mentorship access is approved. Join Server B within 24 hours using this "
+            f"single-use invitation: {invite.url}"
+        )
+        delivered_by = "private ticket fallback"
+        try:
+            await interaction.user.send(message)
+            delivered_by = "direct message"
+        except discord.HTTPException:
+            try:
+                await interaction.channel.send(f"{interaction.user.mention} {message}")
+            except discord.HTTPException:
+                log.exception("Could not deliver invite to user %s", interaction.user.id)
+                return await interaction.followup.send(
+                    "The invite was created, but neither DM nor ticket delivery worked. Contact staff before requesting another invite.",
+                    ephemeral=True
+                )
+        await database.record_membership_event(
+            ticket["guild_id"], community.id, interaction.user.id,
+            "invite_created", interaction.client.user.id if interaction.client.user else None,
+            f"Attribution={source}; delivery={delivered_by}; invite expires in 24 hours; one use"
+        )
+        await interaction.followup.send(
+            f"Recorded: **{source.replace('_', ' ').title()}**. Your invitation was sent by {delivered_by}.",
+            ephemeral=True
+        )
+        await _send_log(
+            interaction.guild, cfg, "Mentorship approved — invitation issued",
+            interaction.user.id, ticket.get("submitted_email"),
+            f"Attribution: {source.replace('_', ' ').title()}. Invitation expires in 24 hours and allows one use.",
+            discord.Color.green()
+        )
+
+    @discord.ui.button(label="YouTube", style=discord.ButtonStyle.primary, custom_id="reveals:attribution_youtube")
+    async def youtube(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._choose(interaction, "youtube")
+
+    @discord.ui.button(label="Instagram", style=discord.ButtonStyle.primary, custom_id="reveals:attribution_instagram")
+    async def instagram(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._choose(interaction, "instagram")
+
+    @discord.ui.button(label="Sales team", style=discord.ButtonStyle.success, custom_id="reveals:attribution_sales")
+    async def sales(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._choose(interaction, "sales_team")
+
 
 class Mentorship(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._offboarding: set[tuple[int, int]] = set()
+        self._rejected_assignments: set[tuple[int, int]] = set()
         self._superprofile_assignments: dict[tuple[int, int], dict] = {}
+        self._invite_cache: dict[int, dict[str, int]] = {}
+        bot.add_view(AttributionView())
+        self.access_reconciliation.start()
 
-    async def _find_role_assigner(self, guild: discord.Guild, member_id: int, role_id: int):
-        # Discord audit-log entries can arrive just after the member update event.
-        await asyncio.sleep(1)
-        try:
-            async for entry in guild.audit_logs(limit=12, action=discord.AuditLogAction.member_role_update):
-                target = getattr(entry.target, "id", None)
-                if target != member_id or not entry.user:
-                    continue
-                if (datetime.now(timezone.utc) - entry.created_at).total_seconds() > 90:
-                    continue
-                before_roles = {r.id for r in (getattr(entry.before, "roles", None) or [])}
-                after_roles = {r.id for r in (getattr(entry.after, "roles", None) or [])}
-                if role_id in after_roles and role_id not in before_roles:
-                    return entry.user
-        except discord.Forbidden:
-            log.warning("Missing View Audit Log permission in guild %s", guild.id)
-        except discord.HTTPException:
-            log.exception("Could not inspect role assignment audit log in guild %s", guild.id)
-        return None
+    async def cog_load(self):
+        await self._refresh_invite_cache()
 
-    async def _send_role_log(self, guild: discord.Guild, cfg: dict,
-                             member_label: str, user_id: int,
-                             sub: dict | None, role: discord.Role,
-                             assigned_by: discord.abc.User | None = None,
-                             revoked: bool = False,
-                             assigned_by_label: str | None = None):
-        email = (sub or {}).get("email") or "Not recorded"
-        embed = discord.Embed(
-            title="Mentorship role revoked" if revoked else "Mentorship role assigned",
-            color=discord.Color.red() if revoked else discord.Color.green()
-        )
-        embed.add_field(name="Discord user", value=f"{member_label} ({user_id})", inline=False)
-        embed.add_field(name="Role", value=role.mention, inline=True)
-        if not revoked:
-            embed.add_field(name="Assigned by",
-                            value=assigned_by_label or (assigned_by.mention if assigned_by else "Unknown (Discord audit log unavailable)"),
-                            inline=True)
-        embed.add_field(name="Email", value=email, inline=True)
-        embed.add_field(name="Access duration", value="Role-based access — no expiry tracking", inline=False)
-        channel_id = cfg.get("role_revoked_channel_id") if revoked else cfg.get("role_assigned_channel_id")
-        channel = guild.get_channel(channel_id) if channel_id else None
-        if isinstance(channel, discord.TextChannel):
+    @commands.Cog.listener()
+    async def on_ready(self):
+        await self._refresh_invite_cache()
+
+    def cog_unload(self):
+        self.access_reconciliation.cancel()
+
+    async def _refresh_invite_cache(self):
+        for guild in self.bot.guilds:
+            cfg = await database.get_config_by_server_b_id(guild.id)
+            if not cfg or guild.id != cfg.get("server_b_id"):
+                continue
             try:
-                await channel.send(embed=embed)
+                invites = await guild.invites()
+                self._invite_cache[guild.id] = {invite.code: invite.uses or 0 for invite in invites}
             except discord.HTTPException:
-                log.exception("Could not send mentorship role log to %s", channel.id)
-
-    async def _grant_community_access(self, member: discord.Member, cfg: dict,
-                                      sub: dict | None = None):
-        from .ticketing import create_private_ticket
-        community = self.bot.get_guild(cfg.get("server_b_id"))
-        if community is None:
-            log.error("Server B %s is unavailable; cannot grant access to %s", cfg.get("server_b_id"), member.id)
-            return
-        invite_channel = next((ch for ch in community.text_channels
-                               if community.me and ch.permissions_for(community.me).create_instant_invite), None)
-        if invite_channel is None:
-            log.error("No Server B channel allows Create Instant Invite for member %s", member.id)
-            return
-        try:
-            invite = await invite_channel.create_invite(
-                max_uses=1, max_age=86400, unique=True,
-                reason=f"Payment-verified role assigned to {member.id}"
-            )
-        except discord.HTTPException:
-            log.exception("Could not create Server B invite for %s", member.id)
-            return
-        ticket_id = await database.find_open_ticket(member.guild.id, member.id, "purchase")
-        if ticket_id is None:
-            ticket_id = await database.find_open_ticket(member.guild.id, member.id, "renewal")
-        ticket_channel = member.guild.get_channel(ticket_id) if ticket_id else None
-        if not isinstance(ticket_channel, discord.TextChannel):
-            try:
-                ticket_channel = await create_private_ticket(member.guild, member, cfg, "purchase",
-                                                              (sub or {}).get("email"))
-            except (discord.HTTPException, ValueError):
-                log.exception("Could not create access-delivery ticket for %s", member.id)
-                ticket_channel = None
-        if isinstance(ticket_channel, discord.TextChannel):
-            await database.mark_ticket_access_granted(ticket_channel.id, (sub or {}).get("email"))
-        message = (f"Payment verified automatically because you received the configured membership role. "
-                   f"Join Server B using your one-use invite (expires in 24 hours): {invite.url}")
-        try:
-            await member.send(message)
-        except discord.HTTPException:
-            log.warning("Could not DM Server B invite to %s", member.id)
-        if isinstance(ticket_channel, discord.TextChannel):
-            try:
-                await ticket_channel.send(f"{member.mention} {message}")
-            except discord.HTTPException:
-                log.exception("Could not post Server B invite in ticket for %s", member.id)
+                log.warning("Could not cache invites for Server B %s", guild.id)
 
     async def _kick_from_community(self, cfg: dict, user_id: int, reason: str):
         community = self.bot.get_guild(cfg.get("server_b_id"))
         if community is None:
-            log.error("Server B %s is unavailable; cannot offboard %s",
-                      cfg.get("server_b_id"), user_id)
+            log.error("Server B %s is unavailable; cannot offboard %s", cfg.get("server_b_id"), user_id)
             return
         try:
             member = community.get_member(user_id) or await community.fetch_member(user_id)
@@ -121,11 +203,19 @@ class Mentorship(commands.Cog):
         if member:
             try:
                 await member.kick(reason=reason)
+                await database.record_membership_event(
+                    cfg.get("server_a_id"), community.id, user_id, "kicked_from_server_b",
+                    self.bot.user.id if self.bot.user else None, reason
+                )
+                await _send_log(
+                    self.bot.get_guild(cfg.get("server_a_id")), cfg,
+                    "Server B membership removed", user_id, None, reason, discord.Color.red()
+                )
             except discord.HTTPException:
                 log.exception("Could not kick %s from Server B", user_id)
 
-    async def _offboard(self, source: discord.Guild, user_id: int,
-                        cfg: dict, reason: str, member: discord.Member | None = None):
+    async def _offboard(self, source: discord.Guild, user_id: int, cfg: dict,
+                        reason: str, member: discord.Member | None = None):
         key = (source.id, user_id)
         if key in self._offboarding:
             return
@@ -133,11 +223,12 @@ class Mentorship(commands.Cog):
         try:
             sub = await database.get_subscription(user_id, source.id)
             await self._kick_from_community(cfg, user_id, reason)
-            renewal_url = cfg.get("renewal_url") or cfg.get("monthly_url")
-            if renewal_url:
-                message = f"Your mentorship access has ended. Renew your access here: {renewal_url}"
-            else:
-                message = "Your mentorship access has ended. Please contact the team to renew."
+            renewal_url = cfg.get("renewal_url")
+            message = (
+                f"Your mentorship access has ended. Renew your access here: {renewal_url}"
+                if renewal_url else
+                "Your mentorship access has ended. Please contact the team to renew."
+            )
             dm_sent = False
             try:
                 user = await self.bot.fetch_user(user_id)
@@ -150,26 +241,19 @@ class Mentorship(commands.Cog):
                 if current_member:
                     try:
                         from .ticketing import create_private_ticket
-                        await create_private_ticket(
-                            source, current_member, cfg, "renewal",
-                            (sub or {}).get("email")
-                        )
+                        await create_private_ticket(source, current_member, cfg, "renewal", (sub or {}).get("email"))
                     except (discord.HTTPException, ValueError):
                         log.exception("Could not create renewal ticket for %s", user_id)
-                else:
-                    sales = source.get_channel(cfg.get("sales_channel_id"))
-                    if isinstance(sales, discord.TextChannel):
-                        await sales.send(
-                            f"Renewal DM failed and user {user_id} is no longer in Server A. "
-                            "Contact them through the verified support channel."
-                        )
             await database.deactivate_subscription(user_id, source.id)
             role = source.get_role(cfg.get("mentorship_role_id"))
             if role:
-                await self._send_role_log(
-                    source, cfg, str(member) if member else f"User {user_id}",
-                    user_id, sub, role, revoked=True
-                )
+                revoked_channel = source.get_channel(cfg.get("role_revoked_channel_id"))
+                if isinstance(revoked_channel, discord.TextChannel):
+                    embed = discord.Embed(title="Mentorship role revoked", color=discord.Color.red())
+                    embed.add_field(name="Discord user", value=f"<@{user_id}> ({user_id})", inline=False)
+                    embed.add_field(name="Payment email", value=(sub or {}).get("email") or "Not recorded", inline=True)
+                    embed.add_field(name="Reason", value=reason, inline=False)
+                    await revoked_channel.send(embed=embed)
         finally:
             self._offboarding.discard(key)
 
@@ -183,25 +267,147 @@ class Mentorship(commands.Cog):
             return
         sub = await database.get_subscription(after.id, after.guild.id)
         if role in after.roles:
-            # A SuperProfile webhook marker identifies provider-driven role assignments.
             context = self._superprofile_assignments.pop((after.guild.id, after.id), None)
+            actor = None
             if context:
+                actor_label = "Verified SuperProfile webhook"
                 sub = {**(sub or {}), "email": context.get("email") or (sub or {}).get("email")}
-                actor = None
-                actor_label = "SuperProfile — successful purchase"
+                trusted = True
             else:
-                actor = await self._find_role_assigner(after.guild, after.id, role.id)
-                actor_label = None
-            await self._grant_community_access(after, cfg, sub)
-            await self._send_role_log(
-                after.guild, cfg, str(after), after.id, sub, role,
-                assigned_by=actor, assigned_by_label=actor_label
+                actor = await _find_role_assigner(after.guild, after.id, role.id)
+                trusted = _is_trusted_assigner(actor, cfg, after.guild) if actor else False
+                actor_label = str(actor) if actor else "Unverified actor"
+            if not trusted:
+                log.warning("Rejected untrusted mentorship role assignment: guild=%s user=%s actor=%s",
+                            after.guild.id, after.id, getattr(actor, "id", None))
+                await database.record_membership_event(
+                    after.guild.id, cfg.get("server_b_id"), after.id,
+                    "untrusted_role_assignment_rejected", getattr(actor, "id", None),
+                    "Role was not treated as payment confirmation"
+                )
+                self._rejected_assignments.add((after.guild.id, after.id))
+                try:
+                    await after.remove_roles(role, reason="Untrusted role assignment; provider staff verification required")
+                except discord.HTTPException:
+                    log.exception("Could not remove untrusted mentorship role from %s", after.id)
+                return
+            await database.record_membership_event(
+                after.guild.id, cfg.get("server_b_id"), after.id, "payment_role_assigned",
+                getattr(actor, "id", None), actor_label
             )
+            from .ticketing import create_private_ticket
+            ticket_id = await database.find_open_ticket(after.guild.id, after.id, "purchase")
+            if ticket_id is None:
+                ticket_id = await database.find_open_ticket(after.guild.id, after.id, "renewal")
+            ticket = after.guild.get_channel(ticket_id) if ticket_id else None
+            if not isinstance(ticket, discord.TextChannel):
+                try:
+                    ticket = await create_private_ticket(after.guild, after, cfg, "purchase", (sub or {}).get("email"))
+                except (discord.HTTPException, ValueError):
+                    log.exception("Could not create post-approval ticket for %s", after.id)
+                    return
+            await database.mark_ticket_access_granted(ticket.id, (sub or {}).get("email"))
+            embed = discord.Embed(
+                title="Payout approved",
+                description=(
+                    f"{after.mention}, your mentorship access has been verified by an authorized provider manager or sales staff member.\n\n"
+                    "**Where did you come from?** Did YouTube, Instagram, or our sales team convince you to buy?"
+                ),
+                color=discord.Color.green()
+            )
+            embed.add_field(name="Verified by", value=actor_label, inline=False)
+            await ticket.send(embed=embed, view=AttributionView())
+            ticket_record = await database.get_ticket(ticket.id)
+            buyer_email = (sub or {}).get("email") or (ticket_record or {}).get("submitted_email")
+            await _send_log(after.guild, cfg, "Approved payout role assigned", after.id,
+                            buyer_email, f"Verified by: {actor_label}", discord.Color.green())
         else:
-            await self._offboard(
-                after.guild, after.id, cfg,
-                "Mentorship role removed in Server A", member=after
-            )
+            if (after.guild.id, after.id) in self._rejected_assignments:
+                self._rejected_assignments.discard((after.guild.id, after.id))
+                return
+            await self._offboard(after.guild, after.id, cfg,
+                                 "Mentorship role removed in Server A", member=after)
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        cfg = await database.get_config_by_server_b_id(member.guild.id)
+        if not cfg or member.guild.id != cfg.get("server_b_id"):
+            return
+        try:
+            current_invites = await member.guild.invites()
+        except discord.HTTPException:
+            log.exception("Could not inspect Server B invites after join")
+            return
+        previous = self._invite_cache.get(member.guild.id, {})
+        used = [invite for invite in current_invites
+                if (invite.uses or 0) > previous.get(invite.code, 0)]
+        self._invite_cache[member.guild.id] = {invite.code: invite.uses or 0 for invite in current_invites}
+        if len(used) != 1:
+            log.warning("Could not uniquely attribute Server B join for user %s", member.id)
+            return
+        record = await database.get_pending_invite_by_code(used[0].code)
+        if not record or record["user_id"] != member.id or record["guild_b_id"] != member.guild.id:
+            log.warning("Server B join did not match the intended user/invite: user=%s", member.id)
+            return
+        if not await database.consume_community_invite(used[0].code, member.id):
+            return
+        role = member.guild.get_role(cfg.get("community_mentorship_role_id"))
+        if role is None:
+            log.error("Server B mentorship role is not configured; cannot grant role to %s", member.id)
+            return
+        try:
+            await member.add_roles(role, reason="Verified one-use mentorship invitation")
+        except discord.HTTPException:
+            log.exception("Could not assign Server B mentorship role to %s", member.id)
+            return
+        await database.record_membership_event(
+            cfg.get("server_a_id"), member.guild.id, member.id, "server_b_access_granted",
+            self.bot.user.id if self.bot.user else None, "One-use 24-hour invite matched"
+        )
+        ticket_id = record.get("ticket_channel_id")
+        ticket = self.bot.get_channel(ticket_id) if ticket_id else None
+        if isinstance(ticket, discord.TextChannel):
+            await database.close_ticket(ticket.id)
+            try:
+                await ticket.delete(reason="Buyer joined Server B and received mentorship role")
+            except discord.HTTPException:
+                log.exception("Could not delete completed purchase ticket %s", ticket.id)
+        source = self.bot.get_guild(cfg.get("server_a_id"))
+        if source:
+            await _send_log(source, cfg, "Server B access granted", member.id, record.get("email"),
+                            "Buyer joined using their assigned one-use invitation; Server B role assigned.",
+                            discord.Color.green())
+
+    @tasks.loop(minutes=20)
+    async def access_reconciliation(self):
+        await self.bot.wait_until_ready()
+        for source in self.bot.guilds:
+            cfg = await database.get_config(source.id)
+            if not cfg or source.id != cfg.get("server_a_id"):
+                continue
+            community = self.bot.get_guild(cfg.get("server_b_id"))
+            role = source.get_role(cfg.get("mentorship_role_id"))
+            if community is None or role is None:
+                continue
+            for community_member in list(community.members):
+                try:
+                    source_member = source.get_member(community_member.id) or await source.fetch_member(community_member.id)
+                except discord.NotFound:
+                    await self._kick_from_community(cfg, community_member.id,
+                                                    "User is no longer a member of Server A")
+                    continue
+                except discord.HTTPException:
+                    log.warning("Could not reconcile Server A membership for %s", community_member.id)
+                    continue
+                if role not in source_member.roles:
+                    await self._kick_from_community(
+                        cfg, community_member.id,
+                        "Required mentorship role is missing in Server A"
+                    )
+
+    @access_reconciliation.before_loop
+    async def before_access_reconciliation(self):
+        await self.bot.wait_until_ready()
 
 
 async def setup(bot):

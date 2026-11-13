@@ -121,10 +121,12 @@ async def create_private_ticket(guild: discord.Guild, member: discord.Member,
         ),
         color=discord.Color.dark_teal()
     )
-    if cfg.get("renewal_url") or cfg.get("monthly_url"):
+    checkout_url = cfg.get("first_purchase_url") if kind == "purchase" else cfg.get("renewal_url")
+    if checkout_url:
+        checkout_label = "first-time purchase" if kind == "purchase" else "renewal"
         instructions.add_field(
             name="Checkout",
-            value="Select **Get membership link** below. Keep this ticket open until your access is delivered.",
+            value=f"Select **Get membership link** below for your {checkout_label} checkout. Keep this ticket open until your access is delivered.",
             inline=False
         )
     await channel.send(embed=instructions, view=PurchaseTierView())
@@ -411,7 +413,10 @@ class PurchaseTierView(discord.ui.View):
         if ticket["approval_status"] != "pending":
             return await interaction.response.send_message("This ticket is no longer pending.", ephemeral=True)
         cfg = await database.get_config(ticket["guild_id"])
-        url = (cfg.get("renewal_url") or cfg.get("monthly_url")) if cfg else None
+        if cfg:
+            url = cfg.get("first_purchase_url") if ticket["ticket_type"] == "purchase" else cfg.get("renewal_url")
+        else:
+            url = None
         if not url or not url.startswith(("https://", "http://")):
             return await interaction.response.send_message("The membership checkout link is not configured. Contact staff.", ephemeral=True)
         checkout_embed = discord.Embed(
