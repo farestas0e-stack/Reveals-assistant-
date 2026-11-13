@@ -104,7 +104,7 @@ class AttributionView(discord.ui.View):
                 expires_at = (discord.utils.utcnow() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
                 await database.add_community_invite(
                     invite.code, ticket["guild_id"], community.id, interaction.user.id,
-                    interaction.channel_id, expires_at
+                    interaction.channel_id, expires_at, ticket.get("submitted_email")
                 )
         except (discord.HTTPException, ValueError):
             log.exception("Could not create one-use community invite for %s", interaction.user.id)
@@ -368,7 +368,7 @@ class Mentorship(commands.Cog):
                 log.exception("Could not delete completed purchase ticket %s", ticket.id)
         source = self.bot.get_guild(cfg.get("server_a_id"))
         if source:
-            await _send_log(source, cfg, "Server B access granted", member.id, None,
+            await _send_log(source, cfg, "Server B access granted", member.id, record.get("email"),
                             "Buyer joined using their assigned one-use invitation; Server B role assigned.",
                             discord.Color.green())
 
