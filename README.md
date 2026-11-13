@@ -21,7 +21,7 @@ A Python 3.10+ Discord bot for a multi-server mentorship membership workflow. It
 
 ## SuperProfile integration
 
-The bot exposes an authenticated relay endpoint for Pabbly's SuperProfile triggers. Pabbly lists Purchase Successful and Subscription Expired as SuperProfile trigger events. On a successful purchase, the bot assigns the configured payment-verified role in Server A. That role assignment triggers the existing access workflow: role log, one-use Server B invite, DM delivery and private-ticket delivery. On a subscription-expired event, the bot removes the role; the existing role-revocation workflow removes the member from Server B. The bot does not calculate membership expiry.
+The bot exposes an authenticated relay endpoint for Pabbly's SuperProfile triggers. Pabbly lists Purchase Successful and Subscription Expired as SuperProfile trigger events. On a successful purchase, the authenticated webhook assigns the configured payment-verified role in Server A and marks that assignment as a trusted provider event. The buyer then completes the attribution buttons before the one-use 24-hour Server B invite is issued. On a subscription-expired event, the webhook removes the role; the role-revocation workflow removes the member from Server B. The bot does not calculate membership expiry.
 
 Set this Railway environment variable to a long random secret (do not put it in GitHub or chat):
 
