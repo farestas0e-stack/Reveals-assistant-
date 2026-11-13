@@ -125,7 +125,8 @@ class Config(commands.Cog):
             staff_role_id=staff_id,
             ticket_log_channel_id=ticket_log_id,
             trusted_provider_manager_role_id=provider_manager_id,
-            sales_staff_role_id=sales_staff_id
+            sales_staff_role_id=sales_staff_id,
+            community_mentorship_role_id=community_role_id
         )
         await interaction.response.send_message(
             "Configuration saved. Membership role assignment triggers automatic payment verification and Server B access.",
