@@ -161,6 +161,7 @@ class Mentorship(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._offboarding: set[tuple[int, int]] = set()
+        self._rejected_assignments: set[tuple[int, int]] = set()
         self._superprofile_assignments: dict[tuple[int, int], dict] = {}
         self._invite_cache: dict[int, dict[str, int]] = {}
         bot.add_view(AttributionView())
@@ -284,6 +285,7 @@ class Mentorship(commands.Cog):
                     "untrusted_role_assignment_rejected", getattr(actor, "id", None),
                     "Role was not treated as payment confirmation"
                 )
+                self._rejected_assignments.add((after.guild.id, after.id))
                 try:
                     await after.remove_roles(role, reason="Untrusted role assignment; provider staff verification required")
                 except discord.HTTPException:
@@ -320,6 +322,9 @@ class Mentorship(commands.Cog):
             await _send_log(after.guild, cfg, "Approved payout role assigned", after.id,
                             buyer_email, f"Verified by: {actor_label}", discord.Color.green())
         else:
+            if (after.guild.id, after.id) in self._rejected_assignments:
+                self._rejected_assignments.discard((after.guild.id, after.id))
+                return
             await self._offboard(after.guild, after.id, cfg,
                                  "Mentorship role removed in Server A", member=after)
 
