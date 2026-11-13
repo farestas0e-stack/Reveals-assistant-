@@ -43,10 +43,22 @@ async def create_private_ticket(guild: discord.Guild, member: discord.Member,
     if guild.me:
         overwrites[guild.me] = discord.PermissionOverwrite(view_channel=True,
             send_messages=True, manage_channels=True, read_message_history=True)
-    staff_role = guild.get_role(cfg.get("staff_role_id")) if cfg.get("staff_role_id") else None
-    if staff_role:
-        overwrites[staff_role] = discord.PermissionOverwrite(view_channel=True,
-            send_messages=True, read_message_history=True, manage_messages=True)
+    # Ticket access for the configured staff and payment-approval roles.
+    staff_role_ids = {
+        cfg.get("staff_role_id"),
+        cfg.get("trusted_provider_manager_role_id"),
+        cfg.get("sales_staff_role_id"),
+    }
+    staff_role_ids.discard(None)
+    for staff_role_id in staff_role_ids:
+        staff_role = guild.get_role(staff_role_id)
+        if staff_role:
+            overwrites[staff_role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_messages=True,
+            )
     for role in guild.roles:
         if role.permissions.administrator:
             overwrites[role] = discord.PermissionOverwrite(view_channel=True,
