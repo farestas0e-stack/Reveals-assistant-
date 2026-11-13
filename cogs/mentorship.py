@@ -223,7 +223,7 @@ class Mentorship(commands.Cog):
         try:
             sub = await database.get_subscription(user_id, source.id)
             await self._kick_from_community(cfg, user_id, reason)
-            renewal_url = cfg.get("renewal_url") or cfg.get("monthly_url")
+            renewal_url = cfg.get("renewal_url")
             message = (
                 f"Your mentorship access has ended. Renew your access here: {renewal_url}"
                 if renewal_url else
