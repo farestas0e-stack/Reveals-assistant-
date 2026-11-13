@@ -109,9 +109,12 @@ class Config(commands.Cog):
             return await interaction.response.send_message("Server B mentorship role ID is invalid.", ephemeral=True)
         if community_role_id and community.me.top_role <= community.get_role(community_role_id):
             return await interaction.response.send_message("Move the bot role above the Server B mentorship role.", ephemeral=True)
-        if not community.me.guild_permissions.kick_members or not community.me.guild_permissions.create_instant_invite or (community_role_id and not community.me.guild_permissions.manage_roles):
+        if (not community.me.guild_permissions.kick_members or
+                not community.me.guild_permissions.create_instant_invite or
+                not community.me.guild_permissions.manage_guild or
+                (community_role_id and not community.me.guild_permissions.manage_roles)):
             return await interaction.response.send_message(
-                "The bot needs Kick Members and Create Invite permissions in Server B.", ephemeral=True
+                "The bot needs Kick Members, Create Invite, Manage Server (to track invite use), and Manage Roles in Server B.", ephemeral=True
             )
         await database.set_config(
             guild.id, server_a_id=guild.id, server_b_id=b_id,
