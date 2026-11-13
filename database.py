@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
  audit_channel_id INTEGER, role_assigned_channel_id INTEGER, role_revoked_channel_id INTEGER,
  ticket_category_id INTEGER, renewal_category_id INTEGER,
  ticket_log_channel_id INTEGER,
- renewal_url TEXT, subscription_days INTEGER NOT NULL DEFAULT 30,
+ first_purchase_url TEXT, renewal_url TEXT, subscription_days INTEGER NOT NULL DEFAULT 30,
  panel_channel_id INTEGER, panel_message_id INTEGER,
  monthly_url TEXT, staff_role_id INTEGER,
  trusted_provider_manager_role_id INTEGER, sales_staff_role_id INTEGER,
@@ -70,7 +70,7 @@ async def init_db() -> None:
             "guild_config": {
                 "monthly_url": "TEXT", "staff_role_id": "INTEGER",
                 "role_assigned_channel_id": "INTEGER", "role_revoked_channel_id": "INTEGER",
-                "renewal_url": "TEXT", "ticket_log_channel_id": "INTEGER",
+                "first_purchase_url": "TEXT", "renewal_url": "TEXT", "ticket_log_channel_id": "INTEGER",
                 "trusted_provider_manager_role_id": "INTEGER", "sales_staff_role_id": "INTEGER",
                 "community_mentorship_role_id": "INTEGER"
             },
@@ -114,7 +114,7 @@ async def set_config(guild_id: int, **values: Any) -> None:
         "server_a_id", "server_b_id", "mentorship_role_id",
         "sales_channel_id", "audit_channel_id", "role_assigned_channel_id",
         "role_revoked_channel_id", "ticket_category_id", "renewal_category_id",
-        "renewal_url", "subscription_days", "panel_channel_id",
+        "first_purchase_url", "renewal_url", "subscription_days", "panel_channel_id",
         "panel_message_id", "monthly_url", "staff_role_id", "ticket_log_channel_id",
         "trusted_provider_manager_role_id", "sales_staff_role_id", "community_mentorship_role_id"
     }
