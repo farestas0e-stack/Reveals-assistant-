@@ -45,6 +45,8 @@ def _is_trusted_assigner(actor: discord.abc.User, cfg: dict, guild: discord.Guil
 
 async def _send_log(guild: discord.Guild, cfg: dict, title: str, member_id: int,
                     email: str | None, detail: str, color: discord.Color):
+    if guild is None:
+        return
     channel_id = cfg.get("sales_channel_id")
     channel = guild.get_channel(channel_id) if channel_id else None
     if not isinstance(channel, discord.TextChannel):
