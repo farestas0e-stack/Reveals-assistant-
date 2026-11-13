@@ -26,7 +26,8 @@ class Config(commands.Cog):
         staff_role_id="Optional staff role ID in Server A",
         ticket_log_channel_id="Optional ticket transcript and closure log channel ID in Server A",
         trusted_provider_manager_role_id="Role allowed to confirm provider-approved payouts",
-        sales_staff_role_id="Sales staff role allowed to confirm approved payouts"
+        sales_staff_role_id="Sales staff role allowed to confirm approved payouts",
+        community_mentorship_role_id="Mentorship access role in Server B"
     )
     async def setup(
         self, interaction: discord.Interaction, server_b_id: str,
@@ -35,7 +36,8 @@ class Config(commands.Cog):
         ticket_category_id: str, renewal_category_id: str,
         renewal_url: str,
         staff_role_id: str | None = None, ticket_log_channel_id: str | None = None,
-        trusted_provider_manager_role_id: str | None = None, sales_staff_role_id: str | None = None
+        trusted_provider_manager_role_id: str | None = None, sales_staff_role_id: str | None = None,
+        community_mentorship_role_id: str | None = None
     ):
         guild = interaction.guild
         if guild is None:
@@ -52,6 +54,7 @@ class Config(commands.Cog):
             ticket_log_id = int(ticket_log_channel_id) if ticket_log_channel_id else None
             provider_manager_id = int(trusted_provider_manager_role_id) if trusted_provider_manager_role_id else None
             sales_staff_id = int(sales_staff_role_id) if sales_staff_role_id else None
+            community_role_id = int(community_mentorship_role_id) if community_mentorship_role_id else None
         except ValueError:
             return await interaction.response.send_message("Every supplied ID must be numeric.", ephemeral=True)
 
@@ -100,7 +103,11 @@ class Config(commands.Cog):
         community = self.bot.get_guild(b_id)
         if community is None or community.me is None:
             return await interaction.response.send_message("Invite the bot to Server B first.", ephemeral=True)
-        if not community.me.guild_permissions.kick_members or not community.me.guild_permissions.create_instant_invite:
+        if community_role_id and community.get_role(community_role_id) is None:
+            return await interaction.response.send_message("Server B mentorship role ID is invalid.", ephemeral=True)
+        if community_role_id and community.me.top_role <= community.get_role(community_role_id):
+            return await interaction.response.send_message("Move the bot role above the Server B mentorship role.", ephemeral=True)
+        if not community.me.guild_permissions.kick_members or not community.me.guild_permissions.create_instant_invite or (community_role_id and not community.me.guild_permissions.manage_roles):
             return await interaction.response.send_message(
                 "The bot needs Kick Members and Create Invite permissions in Server B.", ephemeral=True
             )
@@ -154,6 +161,7 @@ class Config(commands.Cog):
         embed.add_field(name="Membership / renewal link", value="Configured" if (cfg.get("renewal_url") or cfg.get("monthly_url")) else "Missing", inline=True)
         embed.add_field(name="Trusted Provider Manager", value=f"<@&{cfg['trusted_provider_manager_role_id']}>" if cfg.get("trusted_provider_manager_role_id") else "Not set", inline=True)
         embed.add_field(name="Sales Staff", value=f"<@&{cfg['sales_staff_role_id']}>" if cfg.get("sales_staff_role_id") else "Not set", inline=True)
+        embed.add_field(name="Server B mentorship role", value=f"<@&{cfg['community_mentorship_role_id']}>" if cfg.get("community_mentorship_role_id") else "Not set", inline=True)
         embed.add_field(name="Staff role", value=f"<@&{cfg['staff_role_id']}>" if cfg.get("staff_role_id") else "Not set", inline=True)
         embed.add_field(name="Ticket logs / transcripts", value=f"<#{cfg['ticket_log_channel_id']}>" if cfg.get("ticket_log_channel_id") else "Not set — configure in /setup", inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)
