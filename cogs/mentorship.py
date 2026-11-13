@@ -153,6 +153,10 @@ class Mentorship(commands.Cog):
     async def cog_load(self):
         await self._refresh_invite_cache()
 
+    @commands.Cog.listener()
+    async def on_ready(self):
+        await self._refresh_invite_cache()
+
     def cog_unload(self):
         self.access_reconciliation.cancel()
 
