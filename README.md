@@ -8,7 +8,7 @@ A Python 3.10+ Discord bot for a multi-server mentorship membership workflow. It
 - Server B is the gated community. The existing SuperProfile webhook remains supported, and authorized Trusted Provider Managers or Sales Staff can confirm provider-approved payouts by assigning the configured mentorship role in Server A.
 - /setup stores all server, role, channel, category and checkout settings in SQLite. No server/channel/role IDs are hardcoded.
 - /mentorship_panel posts an embed with a Purchase Mentorship button. The modal collects the buyer's Whop/payment email before creating a private ticket.
-- The ticket provides one membership checkout link. The buyer uploads a payment screenshot; the sales channel receives only the screenshot attachment.
+- First-time purchase tickets use the dedicated first-purchase checkout URL; renewal tickets and offboarding messages use the separate renewal URL. The buyer uploads a payment screenshot; the sales channel receives only the screenshot attachment.
 - SuperProfile purchase and subscription-expired events can be relayed through Pabbly to the bot's authenticated webhook. The bot assigns or removes the configured role and records SuperProfile as the source in the role log.
 - Payment confirmation is a trusted role assignment: the bot checks Discord audit logs and accepts assignments made by members with the configured Trusted Provider Manager or Sales Staff role. The authenticated SuperProfile webhook remains a trusted legacy source. Arbitrary role assignments are rejected and do not grant access.
 - After approval, the buyer selects YouTube, Instagram or Sales Team as the attribution source. The bot creates a Server B invite with a 24-hour expiry and one maximum use, sends it by DM first, and falls back to the private ticket if DMs are closed.
@@ -117,11 +117,12 @@ Run /setup in Server A as an Administrator. Supply:
 5. Role-revoked log channel ID in Server A
 6. Purchase ticket category ID in Server A
 7. Renewal ticket category ID in Server A
-8. Single membership / renewal checkout URL
-9. Optional ticket staff role ID
-10. Trusted Provider Manager role ID
-11. Sales Staff role ID
-12. Server B mentorship role ID
+8. First-time purchase checkout URL
+9. Separate renewal checkout URL
+10. Optional ticket staff role ID
+11. Trusted Provider Manager role ID
+12. Sales Staff role ID
+13. Server B mentorship role ID
 
 Copy IDs with Discord Developer Mode enabled. The bot validates the configured channels, roles, Server B membership, invite-tracking permissions and role hierarchy. Both trusted staff roles and the Server B mentorship role are required. Then run /setup_status to inspect saved configuration.
 
@@ -132,7 +133,7 @@ Next, run /mentorship_panel and select the public purchase-panel channel.
 Use a test account and test payment method first:
 1. Click Purchase Mentorship and submit the payment email.
 2. Confirm a private ticket is created and only the buyer/staff can view it.
-3. Click Get membership link and confirm the single checkout link is shown.
+3. In a first-time purchase ticket, click Get membership link and confirm the first-purchase URL is shown. In a renewal ticket, confirm the renewal URL is shown instead.
 4. Upload a test receipt image.
 5. Confirm the screenshot embed is forwarded to the sales log.
 6. Have a member with the configured Trusted Provider Manager or Sales Staff role assign the Server A mentorship role.
