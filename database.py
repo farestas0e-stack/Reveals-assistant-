@@ -99,6 +99,15 @@ async def get_config(guild_id: int) -> dict[str, Any] | None:
         row = await (await db.execute("SELECT * FROM guild_config WHERE guild_id=?", (guild_id,))).fetchone()
         return dict(row) if row else None
 
+async def get_config_by_server_b_id(server_b_id: int) -> dict[str, Any] | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute(
+            "SELECT * FROM guild_config WHERE server_b_id=? LIMIT 1", (server_b_id,)
+        )).fetchone()
+        return dict(row) if row else None
+
+
 async def set_config(guild_id: int, **values: Any) -> None:
     allowed = {
         "server_a_id", "server_b_id", "mentorship_role_id",
