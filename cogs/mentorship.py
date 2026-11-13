@@ -84,15 +84,22 @@ class AttributionView(discord.ui.View):
         if invite_channel is None:
             return await interaction.response.send_message("The bot cannot create an invitation right now. Contact staff.", ephemeral=True)
         try:
-            invite = await invite_channel.create_invite(
-                max_age=86400, max_uses=1, unique=True,
-                reason=f"Approved mentorship access for Discord user {interaction.user.id}"
-            )
-            expires_at = (discord.utils.utcnow() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
-            await database.add_community_invite(
-                invite.code, ticket["guild_id"], community.id, interaction.user.id,
-                interaction.channel_id, expires_at
-            )
+            invite = None
+            existing_records = await database.active_invites_for_user(ticket["guild_id"], interaction.user.id)
+            if existing_records:
+                available_invites = await community.invites()
+                invite = next((item for item in available_invites
+                               if item.code == existing_records[0]["invite_code"]), None)
+            if invite is None:
+                invite = await invite_channel.create_invite(
+                    max_age=86400, max_uses=1, unique=True,
+                    reason=f"Approved mentorship access for Discord user {interaction.user.id}"
+                )
+                expires_at = (discord.utils.utcnow() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+                await database.add_community_invite(
+                    invite.code, ticket["guild_id"], community.id, interaction.user.id,
+                    interaction.channel_id, expires_at
+                )
         except (discord.HTTPException, ValueError):
             log.exception("Could not create one-use community invite for %s", interaction.user.id)
             return await interaction.response.send_message("Invitation creation failed. Staff have been notified.", ephemeral=True)
