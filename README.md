@@ -6,7 +6,6 @@ A Python 3.10+ Discord bot for a multi-server mentorship membership workflow. It
 
 - Server A is the sales, purchase-ticket and payment-verification server.
 - Server B is the gated community. A successful SuperProfile purchase event assigns the configured role and triggers a one-use invite that expires after 24 hours.
-- Optional Server C receives moderation events from Server A.
 - /setup stores all server, role, channel, category and checkout settings in SQLite. No server/channel/role IDs are hardcoded.
 - /mentorship_panel posts an embed with a Purchase Mentorship button. The modal collects the buyer's Whop/payment email before creating a private ticket.
 - The ticket provides one membership checkout link. The buyer uploads a payment screenshot; the sales channel receives only the screenshot attachment.
@@ -16,7 +15,6 @@ A Python 3.10+ Discord bot for a multi-server mentorship membership workflow. It
 - Role assignment and revocation logs are sent to separate channels. A role-assigned event is logged once, with the member, role, assigning user (when Discord audit logs expose it), and role-based/no-expiry access status. There are no manual approval buttons.
 - Removing the configured membership role triggers offboarding from Server B and sends renewal instructions. The bot does not calculate membership expiry.
 - /broadcast sends to text channels in a category. Its mention_users option controls whether user mentions are allowed; role and @everyone mentions remain disabled.
-- Optional Server C forwarding supports member bans, detected kicks and cached message deletions.
 
 ## SuperProfile integration
 
@@ -78,7 +76,7 @@ Enable these privileged intents in the Discord Developer Portal:
 - Server Members Intent
 - Message Content Intent
 
-Invite the bot to Server A and Server B (and Server C if used). The bot needs:
+Invite the bot to Server A and Server B. The bot needs:
 
 **Server A**
 - View Channels, Send Messages, Embed Links, Read Message History
@@ -89,8 +87,6 @@ Invite the bot to Server A and Server B (and Server C if used). The bot needs:
 **Server B**
 - View Channels, Create Instant Invite, Kick Members
 
-**Server C (optional)**
-- View Channels, Send Messages, Embed Links
 
 Place the bot's highest role above the mentorship role. Keep the bot's permissions and staff roles restricted.
 
@@ -120,8 +116,6 @@ Run /setup in Server A as an Administrator. Supply:
 7. Renewal ticket category ID in Server A
 8. Single membership / renewal checkout URL
 9. Optional staff role ID
-10. Optional Server C ID
-11. Optional Server C log channel ID
 
 Copy IDs with Discord Developer Mode enabled. The bot validates the configured channels, role, Server B membership and core permissions. Then run /setup_status to inspect saved configuration.
 
@@ -144,7 +138,7 @@ Use a test account and test payment method first:
 
 | Command | Purpose |
 |---|---|
-| /setup | Configure Server A/B/C, role, categories, channels and checkout links (Administrator) |
+| /setup | Configure Server A/B, role, categories, channels and checkout links (Administrator) |
 | /setup_status | Show saved setup status (Administrator) |
 | /mentorship_panel | Post the purchase panel (Administrator) |
 | /membership_status | Check whether the configured membership role is assigned (Manage Roles) |
@@ -158,5 +152,4 @@ Ticket owners can also use the Close ticket button. The configured membership ro
 - Discord role changes and ticket actions require the bot to be online.
 - The SuperProfile webhook requires a Pabbly workflow and SUPERPROFILE_WEBHOOK_SECRET in Railway; the code does not connect to your Pabbly account or create workflows automatically.
 - If a customer leaves Server A before a renewal ticket can be created, the bot posts a staff alert in the sales channel instead.
-- Message-delete forwarding only includes content cached by discord.py; Discord does not provide deleted message content in every case.
 - Never commit .env, bot tokens, webhook secrets or the SQLite database. Rotate the Discord token immediately if it is exposed.
