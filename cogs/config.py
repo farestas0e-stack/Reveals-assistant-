@@ -24,7 +24,9 @@ class Config(commands.Cog):
         renewal_category_id="Renewal ticket category ID in Server A",
         renewal_url="Single membership / renewal checkout URL",
         staff_role_id="Optional staff role ID in Server A",
-        ticket_log_channel_id="Optional ticket transcript and closure log channel ID in Server A"
+        ticket_log_channel_id="Optional ticket transcript and closure log channel ID in Server A",
+        trusted_provider_manager_role_id="Role allowed to confirm provider-approved payouts",
+        sales_staff_role_id="Sales staff role allowed to confirm approved payouts"
     )
     async def setup(
         self, interaction: discord.Interaction, server_b_id: str,
@@ -32,7 +34,8 @@ class Config(commands.Cog):
         role_assigned_channel_id: str, role_revoked_channel_id: str,
         ticket_category_id: str, renewal_category_id: str,
         renewal_url: str,
-        staff_role_id: str | None = None, ticket_log_channel_id: str | None = None
+        staff_role_id: str | None = None, ticket_log_channel_id: str | None = None,
+        trusted_provider_manager_role_id: str | None = None, sales_staff_role_id: str | None = None
     ):
         guild = interaction.guild
         if guild is None:
@@ -47,6 +50,8 @@ class Config(commands.Cog):
             ]
             staff_id = int(staff_role_id) if staff_role_id else None
             ticket_log_id = int(ticket_log_channel_id) if ticket_log_channel_id else None
+            provider_manager_id = int(trusted_provider_manager_role_id) if trusted_provider_manager_role_id else None
+            sales_staff_id = int(sales_staff_role_id) if sales_staff_role_id else None
         except ValueError:
             return await interaction.response.send_message("Every supplied ID must be numeric.", ephemeral=True)
 
@@ -76,6 +81,12 @@ class Config(commands.Cog):
             return await interaction.response.send_message("Ticket log channel ID must identify a text channel in Server A.", ephemeral=True)
         if staff_id and guild.get_role(staff_id) is None:
             return await interaction.response.send_message("Staff role ID is invalid.", ephemeral=True)
+        if provider_manager_id and guild.get_role(provider_manager_id) is None:
+            return await interaction.response.send_message("Trusted Provider Manager role ID is invalid.", ephemeral=True)
+        if sales_staff_id and guild.get_role(sales_staff_id) is None:
+            return await interaction.response.send_message("Sales Staff role ID is invalid.", ephemeral=True)
+        if not provider_manager_id and not sales_staff_id:
+            return await interaction.response.send_message("Configure at least one trusted role: Trusted Provider Manager or Sales Staff.", ephemeral=True)
         if guild.me is None:
             return await interaction.response.send_message("Bot member cache is unavailable; retry in a moment.", ephemeral=True)
         if role >= guild.me.top_role:
@@ -100,7 +111,9 @@ class Config(commands.Cog):
             ticket_category_id=ticket_cat_id, renewal_category_id=renewal_cat_id,
             monthly_url=renewal_url.strip(), renewal_url=renewal_url.strip(),
             staff_role_id=staff_id,
-            ticket_log_channel_id=ticket_log_id
+            ticket_log_channel_id=ticket_log_id,
+            trusted_provider_manager_role_id=provider_manager_id,
+            sales_staff_role_id=sales_staff_id
         )
         await interaction.response.send_message(
             "Configuration saved. Membership role assignment triggers automatic payment verification and Server B access.",
@@ -139,6 +152,8 @@ class Config(commands.Cog):
             value = f"<#{cfg[key]}>" if cfg.get(key) else "Missing"
             embed.add_field(name=label, value=value, inline=True)
         embed.add_field(name="Membership / renewal link", value="Configured" if (cfg.get("renewal_url") or cfg.get("monthly_url")) else "Missing", inline=True)
+        embed.add_field(name="Trusted Provider Manager", value=f"<@&{cfg['trusted_provider_manager_role_id']}>" if cfg.get("trusted_provider_manager_role_id") else "Not set", inline=True)
+        embed.add_field(name="Sales Staff", value=f"<@&{cfg['sales_staff_role_id']}>" if cfg.get("sales_staff_role_id") else "Not set", inline=True)
         embed.add_field(name="Staff role", value=f"<@&{cfg['staff_role_id']}>" if cfg.get("staff_role_id") else "Not set", inline=True)
         embed.add_field(name="Ticket logs / transcripts", value=f"<#{cfg['ticket_log_channel_id']}>" if cfg.get("ticket_log_channel_id") else "Not set — configure in /setup", inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)
