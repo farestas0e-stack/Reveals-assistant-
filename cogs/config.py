@@ -88,17 +88,19 @@ class Config(commands.Cog):
             return await interaction.response.send_message("Trusted Provider Manager role ID is invalid.", ephemeral=True)
         if sales_staff_id and guild.get_role(sales_staff_id) is None:
             return await interaction.response.send_message("Sales Staff role ID is invalid.", ephemeral=True)
-        if not provider_manager_id and not sales_staff_id:
-            return await interaction.response.send_message("Configure at least one trusted role: Trusted Provider Manager or Sales Staff.", ephemeral=True)
+        if not provider_manager_id or not sales_staff_id:
+            return await interaction.response.send_message("Configure both Trusted Provider Manager and Sales Staff roles.", ephemeral=True)
+        if not community_role_id:
+            return await interaction.response.send_message("Configure the Server B mentorship role.", ephemeral=True)
         if guild.me is None:
             return await interaction.response.send_message("Bot member cache is unavailable; retry in a moment.", ephemeral=True)
         if role >= guild.me.top_role:
             return await interaction.response.send_message(
                 "Move the bot's highest role above the mentorship role before setup.", ephemeral=True
             )
-        if not guild.me.guild_permissions.manage_roles or not guild.me.guild_permissions.manage_channels:
+        if not guild.me.guild_permissions.manage_roles or not guild.me.guild_permissions.manage_channels or not guild.me.guild_permissions.view_audit_log:
             return await interaction.response.send_message(
-                "The bot needs Manage Roles and Manage Channels in Server A.", ephemeral=True
+                "The bot needs Manage Roles, Manage Channels, and View Audit Log in Server A to verify trusted role assignments.", ephemeral=True
             )
         community = self.bot.get_guild(b_id)
         if community is None or community.me is None:
