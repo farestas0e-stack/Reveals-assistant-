@@ -7,31 +7,13 @@ DB_PATH = os.getenv("DB_PATH", "bot.sqlite3")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS guild_config (
  guild_id INTEGER PRIMARY KEY, server_a_id INTEGER, server_b_id INTEGER,
- mentorship_role_id INTEGER, sales_channel_id INTEGER,
+ server_c_id INTEGER, mentorship_role_id INTEGER, sales_channel_id INTEGER,
  audit_channel_id INTEGER, role_assigned_channel_id INTEGER, role_revoked_channel_id INTEGER,
- ticket_category_id INTEGER, renewal_category_id INTEGER,
+ ticket_category_id INTEGER, renewal_category_id INTEGER, log_channel_id INTEGER,
  ticket_log_channel_id INTEGER,
- first_purchase_url TEXT, renewal_url TEXT, subscription_days INTEGER NOT NULL DEFAULT 30,
+ renewal_url TEXT, subscription_days INTEGER NOT NULL DEFAULT 30,
  panel_channel_id INTEGER, panel_message_id INTEGER,
- monthly_url TEXT, staff_role_id INTEGER,
- trusted_provider_manager_role_id INTEGER, sales_staff_role_id INTEGER,
- community_mentorship_role_id INTEGER
-);
-CREATE TABLE IF NOT EXISTS attribution_responses (
- guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, ticket_channel_id INTEGER,
- source TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
- PRIMARY KEY(guild_id,user_id)
-);
-CREATE TABLE IF NOT EXISTS community_invites (
- invite_code TEXT PRIMARY KEY, guild_a_id INTEGER NOT NULL, guild_b_id INTEGER NOT NULL,
- user_id INTEGER NOT NULL, ticket_channel_id INTEGER, email TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
- expires_at TEXT NOT NULL, max_uses INTEGER NOT NULL DEFAULT 1, used_at TEXT,
- status TEXT NOT NULL DEFAULT 'pending'
-);
-CREATE TABLE IF NOT EXISTS membership_events (
- id INTEGER PRIMARY KEY AUTOINCREMENT, guild_a_id INTEGER NOT NULL, guild_b_id INTEGER,
- user_id INTEGER NOT NULL, event_type TEXT NOT NULL, actor_id INTEGER, details TEXT,
- created_at TEXT NOT NULL DEFAULT (datetime('now'))
+ monthly_url TEXT, staff_role_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS protected_member_mention_roles (
  guild_id INTEGER NOT NULL, target_user_id INTEGER NOT NULL, role_id INTEGER NOT NULL,
@@ -66,13 +48,10 @@ async def init_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(SCHEMA)
         migrations = {
-            "community_invites": {"email": "TEXT"},
             "guild_config": {
                 "monthly_url": "TEXT", "staff_role_id": "INTEGER",
                 "role_assigned_channel_id": "INTEGER", "role_revoked_channel_id": "INTEGER",
-                "first_purchase_url": "TEXT", "renewal_url": "TEXT", "ticket_log_channel_id": "INTEGER",
-                "trusted_provider_manager_role_id": "INTEGER", "sales_staff_role_id": "INTEGER",
-                "community_mentorship_role_id": "INTEGER"
+                "renewal_url": "TEXT", "server_c_id": "INTEGER", "log_channel_id": "INTEGER", "ticket_log_channel_id": "INTEGER"
             },
             "subscriptions": {"tenure": "TEXT NOT NULL DEFAULT 'monthly'", "email": "TEXT"},
             "tickets": {
@@ -100,23 +79,13 @@ async def get_config(guild_id: int) -> dict[str, Any] | None:
         row = await (await db.execute("SELECT * FROM guild_config WHERE guild_id=?", (guild_id,))).fetchone()
         return dict(row) if row else None
 
-async def get_config_by_server_b_id(server_b_id: int) -> dict[str, Any] | None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        row = await (await db.execute(
-            "SELECT * FROM guild_config WHERE server_b_id=? LIMIT 1", (server_b_id,)
-        )).fetchone()
-        return dict(row) if row else None
-
-
 async def set_config(guild_id: int, **values: Any) -> None:
     allowed = {
-        "server_a_id", "server_b_id", "mentorship_role_id",
+        "server_a_id", "server_b_id", "server_c_id", "mentorship_role_id",
         "sales_channel_id", "audit_channel_id", "role_assigned_channel_id",
         "role_revoked_channel_id", "ticket_category_id", "renewal_category_id",
-        "first_purchase_url", "renewal_url", "subscription_days", "panel_channel_id",
-        "panel_message_id", "monthly_url", "staff_role_id", "ticket_log_channel_id",
-        "trusted_provider_manager_role_id", "sales_staff_role_id", "community_mentorship_role_id"
+        "log_channel_id", "renewal_url", "subscription_days", "panel_channel_id",
+        "panel_message_id", "monthly_url", "staff_role_id", "ticket_log_channel_id"
     }
     values = {key: value for key, value in values.items() if key in allowed}
     async with aiosqlite.connect(DB_PATH) as db:
@@ -420,74 +389,3 @@ async def get_protected_member_mention_roles(guild_id: int, target_user_id: int 
     for user_id, role_id in rows:
         result.setdefault(int(user_id), set()).add(int(role_id))
     return result
-
-async def save_attribution(guild_id: int, user_id: int, ticket_channel_id: int | None, source: str) -> None:
-    if source not in ("youtube", "instagram", "sales_team"):
-        raise ValueError("Unsupported attribution source.")
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT INTO attribution_responses(guild_id,user_id,ticket_channel_id,source)
-            VALUES(?,?,?,?)
-            ON CONFLICT(guild_id,user_id) DO UPDATE SET
-                ticket_channel_id=excluded.ticket_channel_id,
-                source=excluded.source, recorded_at=datetime('now')
-        """, (guild_id, user_id, ticket_channel_id, source))
-        await db.commit()
-
-async def get_attribution(guild_id: int, user_id: int) -> str | None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        row = await (await db.execute(
-            "SELECT source FROM attribution_responses WHERE guild_id=? AND user_id=?",
-            (guild_id, user_id)
-        )).fetchone()
-        return str(row[0]) if row else None
-
-async def add_community_invite(code: str, guild_a_id: int, guild_b_id: int, user_id: int,
-                               ticket_channel_id: int | None, expires_at: str, email: str | None = None) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT OR REPLACE INTO community_invites
-            (invite_code,guild_a_id,guild_b_id,user_id,ticket_channel_id,email,expires_at,max_uses,status)
-            VALUES(?,?,?,?,?,?,?,1,'pending')
-        """, (code,guild_a_id,guild_b_id,user_id,ticket_channel_id,email,expires_at))
-        await db.commit()
-
-async def get_pending_invite_by_code(code: str) -> dict[str, Any] | None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        row = await (await db.execute("""
-            SELECT * FROM community_invites
-            WHERE invite_code=? AND status='pending' AND used_at IS NULL
-              AND expires_at>datetime('now')
-        """, (code,))).fetchone()
-        return dict(row) if row else None
-
-async def consume_community_invite(code: str, user_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("""
-            UPDATE community_invites SET status='used',used_at=datetime('now')
-            WHERE invite_code=? AND user_id=? AND status='pending'
-              AND used_at IS NULL AND expires_at>datetime('now')
-        """, (code,user_id))
-        await db.commit()
-        return cursor.rowcount == 1
-
-async def record_membership_event(guild_a_id: int, guild_b_id: int | None, user_id: int,
-                                  event_type: str, actor_id: int | None = None,
-                                  details: str | None = None) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT INTO membership_events(guild_a_id,guild_b_id,user_id,event_type,actor_id,details)
-            VALUES(?,?,?,?,?,?)
-        """, (guild_a_id,guild_b_id,user_id,event_type,actor_id,details))
-        await db.commit()
-
-async def active_invites_for_user(guild_a_id: int, user_id: int) -> list[dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        rows = await (await db.execute("""
-            SELECT * FROM community_invites
-            WHERE guild_a_id=? AND user_id=? AND status='pending'
-              AND used_at IS NULL AND expires_at>datetime('now')
-        """, (guild_a_id,user_id))).fetchall()
-        return [dict(row) for row in rows]
