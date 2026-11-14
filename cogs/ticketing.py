@@ -300,7 +300,7 @@ class PurchaseReminderView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Delay next warning by 8 hours",
+        label="Delay next warning by 24 hours",
         style=discord.ButtonStyle.secondary,
         custom_id="reveals:purchase_reminder_delay"
     )
@@ -310,9 +310,9 @@ class PurchaseReminderView(discord.ui.View):
             return await interaction.response.send_message("This purchase ticket is no longer pending.", ephemeral=True)
         if interaction.user.id != ticket["user_id"]:
             return await interaction.response.send_message("Only the ticket owner can delay a reminder.", ephemeral=True)
-        if not await database.delay_ticket_reminder(interaction.channel_id, 8):
+        if not await database.delay_ticket_reminder(interaction.channel_id, 24):
             return await interaction.response.send_message("This ticket can no longer be delayed.", ephemeral=True)
-        await interaction.response.send_message("Next reminder delayed by 8 hours.", ephemeral=True)
+        await interaction.response.send_message("Next reminder delayed by 24 hours.", ephemeral=True)
 
     @discord.ui.button(
         label="Admin: extend by 24 hours",
@@ -467,8 +467,8 @@ class Ticketing(commands.Cog):
                 description=(
                     f"{mention}, are you still interested in joining The Reveals Circle?\n\n"
                     "Choose Get membership link in this ticket to continue, or close the ticket if you no longer want to purchase. "
-                    "You will receive up to 3 warnings, one every 8 hours. "
-                    + ("This is your third warning. The ticket will automatically close in 8 hours unless you delay it or an administrator extends it." if count == 3 else "After the third warning, the ticket will automatically close.")
+                    "You will receive up to 3 warnings, one every 24 hours. "
+                    + ("This is your third warning. The ticket will automatically close in 24 hours unless you delay it or an administrator extends it." if count == 3 else "After the third warning, the ticket will automatically close.")
                 ),
                 color=discord.Color.orange()
             )
