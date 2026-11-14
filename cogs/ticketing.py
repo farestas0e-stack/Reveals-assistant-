@@ -43,22 +43,10 @@ async def create_private_ticket(guild: discord.Guild, member: discord.Member,
     if guild.me:
         overwrites[guild.me] = discord.PermissionOverwrite(view_channel=True,
             send_messages=True, manage_channels=True, read_message_history=True)
-    # Ticket access for the configured staff and payment-approval roles.
-    staff_role_ids = {
-        cfg.get("staff_role_id"),
-        cfg.get("trusted_provider_manager_role_id"),
-        cfg.get("sales_staff_role_id"),
-    }
-    staff_role_ids.discard(None)
-    for staff_role_id in staff_role_ids:
-        staff_role = guild.get_role(staff_role_id)
-        if staff_role:
-            overwrites[staff_role] = discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                manage_messages=True,
-            )
+    staff_role = guild.get_role(cfg.get("staff_role_id")) if cfg.get("staff_role_id") else None
+    if staff_role:
+        overwrites[staff_role] = discord.PermissionOverwrite(view_channel=True,
+            send_messages=True, read_message_history=True, manage_messages=True)
     for role in guild.roles:
         if role.permissions.administrator:
             overwrites[role] = discord.PermissionOverwrite(view_channel=True,
@@ -133,12 +121,10 @@ async def create_private_ticket(guild: discord.Guild, member: discord.Member,
         ),
         color=discord.Color.dark_teal()
     )
-    checkout_url = cfg.get("first_purchase_url") if kind == "purchase" else cfg.get("renewal_url")
-    if checkout_url:
-        checkout_label = "first-time purchase" if kind == "purchase" else "renewal"
+    if cfg.get("renewal_url") or cfg.get("monthly_url"):
         instructions.add_field(
             name="Checkout",
-            value=f"Select **Get membership link** below for your {checkout_label} checkout. Keep this ticket open until your access is delivered.",
+            value="Select **Get membership link** below. Keep this ticket open until your access is delivered.",
             inline=False
         )
     await channel.send(embed=instructions, view=PurchaseTierView())
@@ -425,10 +411,7 @@ class PurchaseTierView(discord.ui.View):
         if ticket["approval_status"] != "pending":
             return await interaction.response.send_message("This ticket is no longer pending.", ephemeral=True)
         cfg = await database.get_config(ticket["guild_id"])
-        if cfg:
-            url = cfg.get("first_purchase_url") if ticket["ticket_type"] == "purchase" else cfg.get("renewal_url")
-        else:
-            url = None
+        url = (cfg.get("renewal_url") or cfg.get("monthly_url")) if cfg else None
         if not url or not url.startswith(("https://", "http://")):
             return await interaction.response.send_message("The membership checkout link is not configured. Contact staff.", ephemeral=True)
         checkout_embed = discord.Embed(
