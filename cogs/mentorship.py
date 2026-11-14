@@ -40,7 +40,9 @@ def _is_trusted_assigner(actor: discord.abc.User, cfg: dict, guild: discord.Guil
         cfg.get("sales_staff_role_id"),
     }
     trusted_ids.discard(None)
-    return any(role.id in trusted_ids for role in actor.roles)
+    has_configured_trusted_role = any(role.id in trusted_ids for role in actor.roles)
+    # Any moderator who can manage roles in Discord may grant the mentorship role.
+    return has_configured_trusted_role or actor.guild_permissions.manage_roles or actor.guild_permissions.administrator
 
 
 async def _send_log(guild: discord.Guild, cfg: dict, title: str, member_id: int,
@@ -278,18 +280,15 @@ class Mentorship(commands.Cog):
                 trusted = _is_trusted_assigner(actor, cfg, after.guild) if actor else False
                 actor_label = str(actor) if actor else "Unverified actor"
             if not trusted:
-                log.warning("Rejected untrusted mentorship role assignment: guild=%s user=%s actor=%s",
+                # Never undo a human role change. If the audit-log actor cannot be
+                # verified, leave the role untouched and do not trigger approval.
+                log.warning("Mentorship role assignment left untouched; assigner lacks verified Manage Roles permission: guild=%s user=%s actor=%s",
                             after.guild.id, after.id, getattr(actor, "id", None))
                 await database.record_membership_event(
                     after.guild.id, cfg.get("server_b_id"), after.id,
-                    "untrusted_role_assignment_rejected", getattr(actor, "id", None),
-                    "Role was not treated as payment confirmation"
+                    "role_assignment_left_untouched", getattr(actor, "id", None),
+                    "Bot did not remove the role; approval automation skipped because the assigner could not be verified"
                 )
-                self._rejected_assignments.add((after.guild.id, after.id))
-                try:
-                    await after.remove_roles(role, reason="Untrusted role assignment; provider staff verification required")
-                except discord.HTTPException:
-                    log.exception("Could not remove untrusted mentorship role from %s", after.id)
                 return
             await database.record_membership_event(
                 after.guild.id, cfg.get("server_b_id"), after.id, "payment_role_assigned",
@@ -307,20 +306,76 @@ class Mentorship(commands.Cog):
                     log.exception("Could not create post-approval ticket for %s", after.id)
                     return
             await database.mark_ticket_access_granted(ticket.id, (sub or {}).get("email"))
+            ticket_record = await database.get_ticket(ticket.id)
+            buyer_email = (sub or {}).get("email") or (ticket_record or {}).get("submitted_email")
+
+            # The configured mentorship role is the purchase-verification signal.
+            # Issue the Server B invite immediately; no attribution click or extra
+            # staff action is required after the role is assigned.
+            community = self.bot.get_guild(cfg.get("server_b_id"))
+            invite = None
+            if community is not None:
+                invite_channel = next((ch for ch in community.text_channels
+                    if community.me and ch.permissions_for(community.me).create_instant_invite), None)
+                if invite_channel is not None:
+                    try:
+                        existing_records = await database.active_invites_for_user(after.guild.id, after.id)
+                        if existing_records:
+                            available_invites = await community.invites()
+                            invite = next((item for item in available_invites
+                                if item.code == existing_records[0]["invite_code"]), None)
+                        if invite is None:
+                            invite = await invite_channel.create_invite(
+                                max_age=86400, max_uses=1, unique=True,
+                                reason=f"Verified mentorship purchase for Discord user {after.id}"
+                            )
+                            expires_at = (discord.utils.utcnow() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+                            await database.add_community_invite(
+                                invite.code, after.guild.id, community.id, after.id,
+                                ticket.id, expires_at, buyer_email
+                            )
+                    except (discord.HTTPException, ValueError):
+                        log.exception("Could not create Server B invite immediately after role verification for %s", after.id)
+                else:
+                    log.error("No Server B channel allows invite creation; verified buyer=%s", after.id)
+            else:
+                log.error("Server B is unavailable; cannot invite verified buyer=%s", after.id)
+
+            invite_delivery = "not delivered"
+            if invite is not None:
+                invite_message = (
+                    f"Your purchase is verified. Join Server B within 24 hours using this "
+                    f"single-use invitation: {invite.url}"
+                )
+                try:
+                    await after.send(invite_message)
+                    invite_delivery = "DM"
+                except discord.HTTPException:
+                    try:
+                        await ticket.send(f"{after.mention} {invite_message}")
+                        invite_delivery = "private ticket"
+                    except discord.HTTPException:
+                        log.exception("Could not deliver Server B invite to verified buyer %s", after.id)
+
             embed = discord.Embed(
-                title="Payout approved",
+                title="Purchase verified",
                 description=(
-                    f"{after.mention}, your mentorship access has been verified by an authorized provider manager or sales staff member.\n\n"
-                    "**Where did you come from?** Did YouTube, Instagram, or our sales team convince you to buy?"
+                    f"{after.mention}, assigning the configured mentorship role counts as purchase verification. "
+                    + (f"Your 24-hour, single-use Server B invitation was sent by {invite_delivery}."
+                       if invite is not None else
+                       "Your purchase is verified, but the invitation could not be created. Staff must check Server B invite permissions/configuration.")
                 ),
                 color=discord.Color.green()
             )
             embed.add_field(name="Verified by", value=actor_label, inline=False)
-            await ticket.send(embed=embed, view=AttributionView())
-            ticket_record = await database.get_ticket(ticket.id)
-            buyer_email = (sub or {}).get("email") or (ticket_record or {}).get("submitted_email")
+            await ticket.send(embed=embed)
+            await database.record_membership_event(
+                after.guild.id, cfg.get("server_b_id"), after.id, "purchase_verified_invite_issued",
+                getattr(actor, "id", None), f"Verified by: {actor_label}; invite delivery: {invite_delivery}"
+            )
             await _send_log(after.guild, cfg, "Approved payout role assigned", after.id,
-                            buyer_email, f"Verified by: {actor_label}", discord.Color.green())
+                            buyer_email, f"Verified by: {actor_label}; Server B invite delivery: {invite_delivery}",
+                            discord.Color.green())
         else:
             if (after.guild.id, after.id) in self._rejected_assignments:
                 self._rejected_assignments.discard((after.guild.id, after.id))
