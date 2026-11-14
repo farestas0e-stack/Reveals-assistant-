@@ -40,7 +40,9 @@ def _is_trusted_assigner(actor: discord.abc.User, cfg: dict, guild: discord.Guil
         cfg.get("sales_staff_role_id"),
     }
     trusted_ids.discard(None)
-    return any(role.id in trusted_ids for role in actor.roles)
+    has_configured_trusted_role = any(role.id in trusted_ids for role in actor.roles)
+    # Any moderator who can manage roles in Discord may grant the mentorship role.
+    return has_configured_trusted_role or actor.guild_permissions.manage_roles or actor.guild_permissions.administrator
 
 
 async def _send_log(guild: discord.Guild, cfg: dict, title: str, member_id: int,
@@ -278,18 +280,15 @@ class Mentorship(commands.Cog):
                 trusted = _is_trusted_assigner(actor, cfg, after.guild) if actor else False
                 actor_label = str(actor) if actor else "Unverified actor"
             if not trusted:
-                log.warning("Rejected untrusted mentorship role assignment: guild=%s user=%s actor=%s",
+                # Never undo a human role change. If the audit-log actor cannot be
+                # verified, leave the role untouched and do not trigger approval.
+                log.warning("Mentorship role assignment left untouched; assigner lacks verified Manage Roles permission: guild=%s user=%s actor=%s",
                             after.guild.id, after.id, getattr(actor, "id", None))
                 await database.record_membership_event(
                     after.guild.id, cfg.get("server_b_id"), after.id,
-                    "untrusted_role_assignment_rejected", getattr(actor, "id", None),
-                    "Role was not treated as payment confirmation"
+                    "role_assignment_left_untouched", getattr(actor, "id", None),
+                    "Bot did not remove the role; approval automation skipped because the assigner could not be verified"
                 )
-                self._rejected_assignments.add((after.guild.id, after.id))
-                try:
-                    await after.remove_roles(role, reason="Untrusted role assignment; provider staff verification required")
-                except discord.HTTPException:
-                    log.exception("Could not remove untrusted mentorship role from %s", after.id)
                 return
             await database.record_membership_event(
                 after.guild.id, cfg.get("server_b_id"), after.id, "payment_role_assigned",
