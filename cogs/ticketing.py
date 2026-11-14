@@ -194,18 +194,28 @@ async def _complete_ticket_close(interaction: discord.Interaction, requester_id:
     if not ticket or ticket["guild_id"] != interaction.guild_id:
         return await interaction.response.send_message("Not a registered ticket.", ephemeral=True)
     is_owner = ticket["user_id"] == interaction.user.id
+    cfg = await database.get_config(ticket["guild_id"])
+    staff_role = (
+        interaction.guild.get_role(cfg.get("staff_role_id"))
+        if cfg and cfg.get("staff_role_id") else None
+    )
+    is_selected_staff = (
+        isinstance(interaction.user, discord.Member)
+        and staff_role is not None
+        and staff_role in interaction.user.roles
+    )
     can_manage = (
         interaction.user.guild_permissions.manage_channels
         or interaction.user.guild_permissions.administrator
+        or is_selected_staff
     )
     if not is_owner and not can_manage:
         return await interaction.response.send_message(
-            "Only the ticket owner or staff can close this ticket.", ephemeral=True
+            "Only the ticket owner, configured staff, or server management can close this ticket.", ephemeral=True
         )
     channel = interaction.channel
     if not isinstance(channel, discord.TextChannel):
         return await interaction.response.send_message("Ticket channel is unavailable.", ephemeral=True)
-    cfg = await database.get_config(ticket["guild_id"])
     log_channel = channel.guild.get_channel(cfg.get("ticket_log_channel_id")) if cfg else None
     if not isinstance(log_channel, discord.TextChannel):
         return await interaction.response.send_message(
@@ -428,9 +438,26 @@ class PurchaseTierView(discord.ui.View):
         if not ticket or ticket["guild_id"] != interaction.guild_id:
             return await interaction.response.send_message("Not a registered ticket.", ephemeral=True)
         is_owner = ticket["user_id"] == interaction.user.id
-        can_manage = interaction.user.guild_permissions.manage_channels or interaction.user.guild_permissions.administrator
+        cfg = await database.get_config(ticket["guild_id"])
+        staff_role = (
+            interaction.guild.get_role(cfg.get("staff_role_id"))
+            if cfg and cfg.get("staff_role_id") else None
+        )
+        is_selected_staff = (
+            isinstance(interaction.user, discord.Member)
+            and staff_role is not None
+            and staff_role in interaction.user.roles
+        )
+        can_manage = (
+            interaction.user.guild_permissions.manage_channels
+            or interaction.user.guild_permissions.administrator
+            or is_selected_staff
+        )
         if not is_owner and not can_manage:
-            return await interaction.response.send_message("Only the ticket owner or staff can close this ticket.", ephemeral=True)
+            return await interaction.response.send_message(
+                "Only the ticket owner, configured staff, or server management can close this ticket.",
+                ephemeral=True
+            )
         await _prompt_ticket_close(interaction, ticket)
 
 class Ticketing(commands.Cog):
