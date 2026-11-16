@@ -527,6 +527,14 @@ class Ticketing(commands.Cog):
         images = [att for att in message.attachments if (att.content_type or "").startswith("image/") or att.filename.lower().endswith(IMAGE_EXTENSIONS)]
         if not images:
             return
+        if message.author.id != ticket["user_id"]:
+            await message.channel.send(
+                "Payment screenshots can only be submitted by the ticket owner. "
+                "Please ask the ticket owner to upload the screenshot."
+            )
+            return
+        if not images:
+            return
         if ticket["approval_status"] == "pending":
             await database.set_evidence(message.channel.id, message.id)
         cfg = await database.get_config(message.guild.id)
