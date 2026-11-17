@@ -305,7 +305,7 @@ async def advance_ticket_reminder(channel_id: int) -> int | None:
             SET reminder_count=1, next_reminder_at=datetime('now','+3 hours')
             WHERE channel_id=? AND ticket_type='purchase'
               AND approval_status='pending' AND closed_at IS NULL
-              AND reminder_count=0
+              AND reminder_count=0 AND next_reminder_at<=datetime('now')
         """, (channel_id,))
         await db.commit()
         return 1 if cursor.rowcount == 1 else None
@@ -338,7 +338,7 @@ async def delay_ticket_reminder(channel_id: int, hours: int) -> bool:
         raise ValueError("Reminder delay must be 24 hours.")
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("""
-            UPDATE tickets SET next_reminder_at=datetime('now', ?)
+            UPDATE tickets SET reminder_count=0, next_reminder_at=datetime('now', ?)
             WHERE channel_id=? AND ticket_type='purchase'
               AND approval_status='pending' AND closed_at IS NULL
         """, (f"+{hours} hours", channel_id))
