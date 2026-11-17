@@ -6,7 +6,7 @@ import database
 
 
 class NukeConfirmView(discord.ui.View):
-    def __init__(self, author_id: int, channel: discord.TextChannel | discord.Thread):
+    def __init__(self, author_id: int, channel: discord.TextChannel):
         super().__init__(timeout=30)
         self.author_id = author_id
         self.channel = channel
@@ -25,26 +25,39 @@ class NukeConfirmView(discord.ui.View):
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(
-            content="Deleting channel messages…", view=self
+            content="Replacing the channel…", view=self
         )
+        reason = f"Channel nuke requested by {interaction.user} ({interaction.user.id})"
+        replacement = None
         try:
-            deleted = await self.channel.purge(
-                limit=None,
-                bulk=True,
-                reason=f"Channel nuke requested by {interaction.user} ({interaction.user.id})"
-            )
+            replacement = await self.channel.clone(reason=reason)
+            await self.channel.delete(reason=reason)
             await interaction.followup.send(
-                f"Channel cleared. Deleted {len(deleted)} messages.",
+                f"Channel nuked. New channel: {replacement.mention}\n"
+                "The channel settings and permission overwrites were copied. "
+                "The channel ID has changed; old links and integrations may need updating.",
                 ephemeral=True
             )
         except discord.Forbidden:
+            if replacement is not None:
+                try:
+                    await replacement.delete(reason="Rollback failed nuke operation")
+                except discord.HTTPException:
+                    pass
             await interaction.followup.send(
-                "I don't have permission to delete messages in this channel.",
+                "I need Manage Channels permission to clone and replace this channel.",
                 ephemeral=True
             )
-        except discord.HTTPException:
+        except discord.HTTPException as error:
+            if replacement is not None and self.channel.id in {
+                channel.id for channel in self.channel.guild.text_channels
+            }:
+                try:
+                    await replacement.delete(reason="Rollback failed nuke operation")
+                except discord.HTTPException:
+                    pass
             await interaction.followup.send(
-                "Discord couldn't delete all messages. Check my permissions and try again.",
+                f"Discord couldn't complete the channel replacement: {error}",
                 ephemeral=True
             )
         self.stop()
@@ -53,9 +66,7 @@ class NukeConfirmView(discord.ui.View):
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         for child in self.children:
             child.disabled = True
-        await interaction.response.edit_message(
-            content="Nuke cancelled.", view=self
-        )
+        await interaction.response.edit_message(content="Nuke cancelled.", view=self)
         self.stop()
 
 
@@ -81,29 +92,26 @@ class ModerationAudit(commands.Cog):
 
 
 
-    @app_commands.command(name="nuke", description="Delete every message in this channel.")
+    @app_commands.command(name="nuke", description="Replace this channel with a clean copy.")
     @app_commands.checks.has_permissions(administrator=True)
     async def nuke(self, interaction: discord.Interaction):
         channel = interaction.channel
-        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+        if not isinstance(channel, discord.TextChannel):
             return await interaction.response.send_message(
-                "Use this command in a text channel or thread.", ephemeral=True
+                "Use this command in a regular text channel.", ephemeral=True
             )
         bot_member = interaction.guild.me if interaction.guild else None
-        if bot_member is None:
+        if bot_member is None or not bot_member.guild_permissions.manage_channels:
             return await interaction.response.send_message(
-                "I couldn't verify my server permissions.", ephemeral=True
-            )
-        permissions = channel.permissions_for(bot_member)
-        if not permissions.manage_messages or not permissions.read_message_history:
-            return await interaction.response.send_message(
-                "I need Manage Messages and Read Message History in this channel.",
+                "I need the Manage Channels server permission to nuke a channel.",
                 ephemeral=True
             )
         view = NukeConfirmView(interaction.user.id, channel)
         await interaction.response.send_message(
-            f"WARNING: This will permanently delete every message in {channel.mention}, "
-            "including pinned messages. The channel and its settings will remain. Continue?",
+            f"WARNING: This replaces {channel.mention} with a clean copy. "
+            "All messages and the old channel ID will be permanently lost. "
+            "The channel's settings and permission overwrites will be copied. "
+            "Existing links, webhooks, and integrations tied to the old channel may break. Continue?",
             view=view,
             ephemeral=True
         )
