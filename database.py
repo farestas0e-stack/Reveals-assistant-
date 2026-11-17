@@ -315,7 +315,10 @@ async def record_ticket_owner_activity(channel_id: int) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             UPDATE tickets
-            SET reminder_count=0, next_reminder_at=datetime('now','+24 hours')
+            SET next_reminder_at=CASE
+                WHEN reminder_count>=1 THEN datetime('now','+3 hours')
+                ELSE datetime('now','+24 hours')
+            END
             WHERE channel_id=? AND ticket_type='purchase'
               AND approval_status='pending' AND closed_at IS NULL
         """, (channel_id,))
