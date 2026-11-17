@@ -84,6 +84,20 @@ async def init_db() -> None:
             await db.execute(
                 "INSERT INTO app_settings (setting_key, setting_value) VALUES ('daily_purchase_reminders_v1', '1')"
             )
+
+        inactivity_migration = await (await db.execute(
+            "SELECT setting_value FROM app_settings WHERE setting_key='purchase_inactivity_warning_v2'"
+        )).fetchone()
+        if inactivity_migration is None:
+            await db.execute("""
+                UPDATE tickets
+                SET reminder_count=0, next_reminder_at=datetime('now','+24 hours')
+                WHERE ticket_type='purchase' AND approval_status='pending'
+                  AND closed_at IS NULL
+            """)
+            await db.execute(
+                "INSERT INTO app_settings (setting_key, setting_value) VALUES ('purchase_inactivity_warning_v2', '1')"
+            )
         await db.execute("""
             UPDATE tickets SET next_reminder_at=datetime('now','+24 hours')
             WHERE ticket_type='purchase' AND approval_status='pending'
@@ -286,26 +300,37 @@ async def due_purchase_ticket_reminders() -> list[dict[str, Any]]:
 
 async def advance_ticket_reminder(channel_id: int) -> int | None:
     async with aiosqlite.connect(DB_PATH) as db:
-        row = await (await db.execute("""
-            SELECT reminder_count FROM tickets
+        cursor = await db.execute("""
+            UPDATE tickets
+            SET reminder_count=1, next_reminder_at=datetime('now','+3 hours')
             WHERE channel_id=? AND ticket_type='purchase'
               AND approval_status='pending' AND closed_at IS NULL
-        """, (channel_id,))).fetchone()
-        if not row:
-            return None
-        count = int(row[0]) + 1
-        if count >= 6:
-            await db.execute(
-                "UPDATE tickets SET reminder_count=?,next_reminder_at=datetime('now','+24 hours') WHERE channel_id=?",
-                (count, channel_id)
-            )
-        else:
-            await db.execute("""
-                UPDATE tickets SET reminder_count=?,next_reminder_at=datetime('now','+24 hours')
-                WHERE channel_id=?
-            """, (count, channel_id))
+              AND reminder_count=0
+        """, (channel_id,))
         await db.commit()
-        return count
+        return 1 if cursor.rowcount == 1 else None
+
+
+async def record_ticket_owner_activity(channel_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            UPDATE tickets
+            SET reminder_count=0, next_reminder_at=datetime('now','+24 hours')
+            WHERE channel_id=? AND ticket_type='purchase'
+              AND approval_status='pending' AND closed_at IS NULL
+        """, (channel_id,))
+        await db.commit()
+
+
+async def retry_ticket_warning(channel_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            UPDATE tickets
+            SET reminder_count=0, next_reminder_at=datetime('now','+1 hour')
+            WHERE channel_id=? AND ticket_type='purchase'
+              AND approval_status='pending' AND closed_at IS NULL
+        """, (channel_id,))
+        await db.commit()
 
 
 async def delay_ticket_reminder(channel_id: int, hours: int) -> bool:
