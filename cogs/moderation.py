@@ -5,71 +5,6 @@ from discord import app_commands
 import database
 
 
-class NukeConfirmView(discord.ui.View):
-    def __init__(self, author_id: int, channel: discord.TextChannel):
-        super().__init__(timeout=30)
-        self.author_id = author_id
-        self.channel = channel
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message(
-                "Only the administrator who started this action can confirm it.",
-                ephemeral=True
-            )
-            return False
-        return True
-
-    @discord.ui.button(label="Confirm nuke", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for child in self.children:
-            child.disabled = True
-        await interaction.response.edit_message(
-            content="Replacing the channel…", view=self
-        )
-        reason = f"Channel nuke requested by {interaction.user} ({interaction.user.id})"
-        replacement = None
-        try:
-            replacement = await self.channel.clone(reason=reason)
-            await self.channel.delete(reason=reason)
-            await interaction.followup.send(
-                f"Channel nuked. New channel: {replacement.mention}\n"
-                "The channel settings and permission overwrites were copied. "
-                "The channel ID has changed; old links and integrations may need updating.",
-                ephemeral=True
-            )
-        except discord.Forbidden:
-            if replacement is not None:
-                try:
-                    await replacement.delete(reason="Rollback failed nuke operation")
-                except discord.HTTPException:
-                    pass
-            await interaction.followup.send(
-                "I need Manage Channels permission to clone and replace this channel.",
-                ephemeral=True
-            )
-        except discord.HTTPException as error:
-            if replacement is not None and self.channel.id in {
-                channel.id for channel in self.channel.guild.text_channels
-            }:
-                try:
-                    await replacement.delete(reason="Rollback failed nuke operation")
-                except discord.HTTPException:
-                    pass
-            await interaction.followup.send(
-                f"Discord couldn't complete the channel replacement: {error}",
-                ephemeral=True
-            )
-        self.stop()
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for child in self.children:
-            child.disabled = True
-        await interaction.response.edit_message(content="Nuke cancelled.", view=self)
-        self.stop()
-
-
 class ModerationAudit(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -91,30 +26,6 @@ class ModerationAudit(commands.Cog):
         await self._send_to(cfg["server_c_id"], cfg["log_channel_id"], embed)
 
 
-
-    @app_commands.command(name="nuke", description="Replace this channel with a clean copy.")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def nuke(self, interaction: discord.Interaction):
-        channel = interaction.channel
-        if not isinstance(channel, discord.TextChannel):
-            return await interaction.response.send_message(
-                "Use this command in a regular text channel.", ephemeral=True
-            )
-        bot_member = interaction.guild.me if interaction.guild else None
-        if bot_member is None or not bot_member.guild_permissions.manage_channels:
-            return await interaction.response.send_message(
-                "I need the Manage Channels server permission to nuke a channel.",
-                ephemeral=True
-            )
-        view = NukeConfirmView(interaction.user.id, channel)
-        await interaction.response.send_message(
-            f"WARNING: This replaces {channel.mention} with a clean copy. "
-            "All messages and the old channel ID will be permanently lost. "
-            "The channel's settings and permission overwrites will be copied. "
-            "Existing links, webhooks, and integrations tied to the old channel may break. Continue?",
-            view=view,
-            ephemeral=True
-        )
 
     @app_commands.command(name="mention_access_add", description="Allow a role to mention a protected member.")
     @app_commands.checks.has_permissions(manage_guild=True)
