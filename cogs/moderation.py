@@ -4,6 +4,61 @@ from discord.ext import commands
 from discord import app_commands
 import database
 
+
+class NukeConfirmView(discord.ui.View):
+    def __init__(self, author_id: int, channel: discord.TextChannel | discord.Thread):
+        super().__init__(timeout=30)
+        self.author_id = author_id
+        self.channel = channel
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the administrator who started this action can confirm it.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm nuke", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            content="Deleting channel messages…", view=self
+        )
+        try:
+            deleted = await self.channel.purge(
+                limit=None,
+                bulk=True,
+                reason=f"Channel nuke requested by {interaction.user} ({interaction.user.id})"
+            )
+            await interaction.followup.send(
+                f"Channel cleared. Deleted {len(deleted)} messages.",
+                ephemeral=True
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "I don't have permission to delete messages in this channel.",
+                ephemeral=True
+            )
+        except discord.HTTPException:
+            await interaction.followup.send(
+                "Discord couldn't delete all messages. Check my permissions and try again.",
+                ephemeral=True
+            )
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            content="Nuke cancelled.", view=self
+        )
+        self.stop()
+
+
 class ModerationAudit(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -24,6 +79,34 @@ class ModerationAudit(commands.Cog):
         embed = discord.Embed(title=title, description=description, color=color)
         await self._send_to(cfg["server_c_id"], cfg["log_channel_id"], embed)
 
+
+
+    @app_commands.command(name="nuke", description="Delete every message in this channel.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def nuke(self, interaction: discord.Interaction):
+        channel = interaction.channel
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            return await interaction.response.send_message(
+                "Use this command in a text channel or thread.", ephemeral=True
+            )
+        bot_member = interaction.guild.me if interaction.guild else None
+        if bot_member is None:
+            return await interaction.response.send_message(
+                "I couldn't verify my server permissions.", ephemeral=True
+            )
+        permissions = channel.permissions_for(bot_member)
+        if not permissions.manage_messages or not permissions.read_message_history:
+            return await interaction.response.send_message(
+                "I need Manage Messages and Read Message History in this channel.",
+                ephemeral=True
+            )
+        view = NukeConfirmView(interaction.user.id, channel)
+        await interaction.response.send_message(
+            f"WARNING: This will permanently delete every message in {channel.mention}, "
+            "including pinned messages. The channel and its settings will remain. Continue?",
+            view=view,
+            ephemeral=True
+        )
 
     @app_commands.command(name="mention_access_add", description="Allow a role to mention a protected member.")
     @app_commands.checks.has_permissions(manage_guild=True)
