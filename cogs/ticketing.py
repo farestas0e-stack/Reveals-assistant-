@@ -285,7 +285,7 @@ async def _auto_close_purchase_ticket(channel: discord.TextChannel, ticket: dict
             description=(
                 f"**Ticket:** #{channel.name}\n"
                 f"**Opened by:** {owner_label}\n"
-                "**Reason:** Three unanswered purchase warnings\n"
+                "**Reason:** No ticket-owner activity within 3 hours of the inactivity warning\n"
                 f"**Messages captured:** {message_count}\n"
                 f"**Transcript:** {'Truncated to fit upload limits' if truncated else 'Complete'}"
             ),
@@ -298,7 +298,7 @@ async def _auto_close_purchase_ticket(channel: discord.TextChannel, ticket: dict
             file=discord.File(io.BytesIO(transcript), filename=f"ticket-{channel.id}-transcript.txt")
         )
         await database.close_ticket(channel.id)
-        await channel.delete(reason="Automatically closed after three unanswered purchase warnings")
+        await channel.delete(reason="Automatically closed after 3 hours without ticket-owner activity following the warning")
         return True
     except (discord.HTTPException, OSError):
         log.exception("Automatic ticket closure failed for %s", channel.id)
@@ -479,37 +479,28 @@ class Ticketing(commands.Cog):
             channel = self.bot.get_channel(ticket["channel_id"])
             if not isinstance(channel, discord.TextChannel):
                 continue
-            if int(ticket.get("reminder_count") or 0) >= 3:
+            if int(ticket.get("reminder_count") or 0) >= 1:
                 if not await _auto_close_purchase_ticket(channel, ticket):
                     await database.retry_ticket_auto_close(channel.id)
                 continue
 
-            count = await database.advance_ticket_reminder(channel.id)
-            if count is None:
-                continue
             member = channel.guild.get_member(ticket["user_id"])
             mention = member.mention if member else f"<@{ticket['user_id']}>"
-            reminder = discord.Embed(
-                title=(f"Final purchase warning {count}/3" if count == 3 else f"Purchase warning {count}/3"),
-                description=(
-                    f"{mention}, are you still interested in joining The Reveals Circle?\n\n"
-                    "Choose Get membership link in this ticket to continue, or close the ticket if you no longer want to purchase. "
-                    "You will receive up to 3 warnings, one every 24 hours. "
-                    + ("This is your third warning. The ticket will automatically close in 24 hours unless you delay it or an administrator extends it." if count == 3 else "After the third warning, the ticket will automatically close.")
-                ),
-                color=discord.Color.orange()
+            reminder_text = (
+                f"{mention}, this purchase ticket has been inactive for 24 hours. "
+                "Please reply or upload your payment evidence within the next 3 hours. "
+                "If there is no activity from you during that period, the ticket will automatically close."
             )
             try:
                 await channel.send(
-                    content=(
-                        f"{mention} — **{'Final purchase warning' if count == 3 else 'Purchase warning'} {count}/3**\n\n"
-                        f"{reminder.description}"
-                    ),
+                    content=reminder_text,
                     view=PurchaseReminderView(),
                     allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False)
                 )
+                await database.advance_ticket_reminder(channel.id)
             except discord.HTTPException:
                 log.exception("Could not send purchase reminder in ticket %s", channel.id)
+                await database.retry_ticket_warning(channel.id)
 
     @purchase_ticket_reminders.before_loop
     async def before_purchase_ticket_reminders(self):
@@ -519,10 +510,18 @@ class Ticketing(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.guild or not message.attachments:
+        if message.author.bot or not message.guild:
             return
         ticket = await database.get_ticket(message.channel.id)
         if not ticket or ticket["ticket_type"] not in ("purchase", "renewal"):
+            return
+        if (
+            ticket["ticket_type"] == "purchase"
+            and ticket["approval_status"] == "pending"
+            and message.author.id == ticket["user_id"]
+        ):
+            await database.record_ticket_owner_activity(message.channel.id)
+        if not message.attachments:
             return
         images = [att for att in message.attachments if (att.content_type or "").startswith("image/") or att.filename.lower().endswith(IMAGE_EXTENSIONS)]
         if not images:
